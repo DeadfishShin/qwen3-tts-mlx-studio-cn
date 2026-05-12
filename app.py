@@ -22,6 +22,7 @@ import soundfile as sf
 from audio_utils import concatenate_audio, export_audio, split_text, unload_deepfilter
 from config import (
     DEFAULT_AUTOSAVE,
+    DEFAULT_BATCH_SIZE,
     DEFAULT_BATCH_SPLIT_MODE,
     DEFAULT_DENOISE_REF,
     DEFAULT_EXPORT_FORMAT,
@@ -43,7 +44,9 @@ from config import (
     HISTORY_DIR,
     LANGUAGES,
     MAX_BATCH_SEGMENTS,
+    MAX_BATCH_SIZE,
     MAX_SCRIPT_SPEAKERS,
+    MIN_BATCH_SIZE,
     OUTPUT_DIR,
     SERVER_HOST,
     SERVER_PORT,
@@ -130,6 +133,7 @@ app_settings = {
     "loudnorm": DEFAULT_LOUDNORM,
     "trim_silence": DEFAULT_TRIM_SILENCE,
     "denoise_ref": DEFAULT_DENOISE_REF,
+    "batch_size": DEFAULT_BATCH_SIZE,
     "default_language": "English",
 }
 
@@ -1111,6 +1115,7 @@ def apply_settings(
     temperature, top_k, top_p, repetition_penalty, max_tokens, timeout,
     output_dir, autosave, jit_compile, default_language,
     export_format, mp3_bitrate, loudnorm, trim_silence, denoise_ref,
+    batch_size,
 ):
     model_changed = (
         model_size != engine.model_size
@@ -1138,6 +1143,7 @@ def apply_settings(
     app_settings["denoise_ref"] = denoise_ref
     if not denoise_ref:
         unload_deepfilter()
+    app_settings["batch_size"] = int(batch_size)
     app_settings["default_language"] = default_language
 
     os.makedirs(app_settings["output_dir"], exist_ok=True)
@@ -1859,6 +1865,12 @@ with gr.Blocks(title="Qwen3-TTS MLX Studio") as app:
                         30, 300, value=DEFAULT_TIMEOUT, step=10,
                         label="Generation Timeout (seconds)",
                     )
+                    set_batch_size = gr.Slider(
+                        MIN_BATCH_SIZE, MAX_BATCH_SIZE,
+                        value=DEFAULT_BATCH_SIZE, step=1,
+                        label="Batch Size",
+                        info="Segments processed in parallel (Custom Voice & Voice Design batch/script modes)",
+                    )
                     set_reset = gr.Button("Reset to Defaults")
 
                 # --- Column 3: Output ---
@@ -2266,6 +2278,7 @@ with gr.Blocks(title="Qwen3-TTS MLX Studio") as app:
             set_output_dir, set_autosave, set_jit, set_default_language,
             set_export_format, set_mp3_bitrate, set_loudnorm, set_trim_silence,
             set_denoise_ref,
+            set_batch_size,
         ],
         outputs=[
             set_status, status,
