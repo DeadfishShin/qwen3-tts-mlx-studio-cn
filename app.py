@@ -463,37 +463,62 @@ def _run_batch_custom_voice(text, speaker, language, instruct, split_mode, silen
         gr.Warning(f"Too many segments ({len(segments)}). Max is {MAX_BATCH_SEGMENTS}.")
         return None, [["(error)", "", ""]], f"Too many segments (max {MAX_BATCH_SEGMENTS})"
 
+    batch_size = app_settings["batch_size"]
     audio_parts = []
     table_rows = []
     succeeded, failed = 0, 0
+    total = len(segments)
 
-    for i, seg in enumerate(progress.tqdm(segments, desc="Generating segments")):
-        preview = seg[:50] + "..." if len(seg) > 50 else seg
+    for batch_start in range(0, total, batch_size):
+        batch_segs = segments[batch_start:batch_start + batch_size]
+        batch_indices = list(range(batch_start, batch_start + len(batch_segs)))
+
         try:
-            sr, audio = generate_with_timeout(
-                engine.generate_custom_voice, seg, speaker, language, instruct,
+            results = generate_with_timeout(
+                engine.batch_generate_custom_voice,
+                batch_segs, speaker, language, instruct,
                 timeout_seconds=app_settings["timeout"],
                 **_gen_kwargs(),
             )
-            duration = len(audio) / sr
-            audio_parts.append((sr, audio))
-            table_rows.append([str(i + 1), preview, f"{duration:.1f}s"])
-            succeeded += 1
-        except Exception as e:
-            table_rows.append([str(i + 1), preview, f"Failed: {e}"])
-            failed += 1
+            for j, (sr, audio) in enumerate(results):
+                idx = batch_indices[j]
+                seg = batch_segs[j]
+                preview = seg[:50] + "..." if len(seg) > 50 else seg
+                duration = len(audio) / sr
+                audio_parts.append((sr, audio))
+                table_rows.append([str(idx + 1), preview, f"{duration:.1f}s"])
+                succeeded += 1
+                progress((batch_start + j + 1) / total, desc="Generating segments")
+        except Exception:
+            # Batch failed — retry each segment individually
+            for j, seg in enumerate(batch_segs):
+                idx = batch_indices[j]
+                preview = seg[:50] + "..." if len(seg) > 50 else seg
+                try:
+                    sr, audio = generate_with_timeout(
+                        engine.generate_custom_voice, seg, speaker, language, instruct,
+                        timeout_seconds=app_settings["timeout"],
+                        **_gen_kwargs(),
+                    )
+                    duration = len(audio) / sr
+                    audio_parts.append((sr, audio))
+                    table_rows.append([str(idx + 1), preview, f"{duration:.1f}s"])
+                    succeeded += 1
+                except Exception as e:
+                    table_rows.append([str(idx + 1), preview, f"Failed: {e}"])
+                    failed += 1
+                progress((batch_start + j + 1) / total, desc="Generating segments")
 
     if not audio_parts:
         return None, table_rows, "All segments failed"
 
     combined = concatenate_audio(audio_parts, silence_ms=int(silence_ms))
-    # Record combined to history
     history.add(
         mode="custom_voice", text=f"[Batch: {succeeded} segments]",
         language=language, audio=combined, speaker=speaker,
         voice_params=f"batch ({split_mode})",
     )
-    status_msg = f"Generated {succeeded}/{len(segments)} segments"
+    status_msg = f"Generated {succeeded}/{total} segments"
     if failed:
         status_msg += f" ({failed} failed)"
     return gr.update(value=combined), table_rows, status_msg
@@ -511,25 +536,51 @@ def _run_batch_voice_design(text, language, instruct, split_mode, silence_ms, pr
         gr.Warning(f"Too many segments ({len(segments)}). Max is {MAX_BATCH_SEGMENTS}.")
         return None, [["(error)", "", ""]], f"Too many segments (max {MAX_BATCH_SEGMENTS})"
 
+    batch_size = app_settings["batch_size"]
     audio_parts = []
     table_rows = []
     succeeded, failed = 0, 0
+    total = len(segments)
 
-    for i, seg in enumerate(progress.tqdm(segments, desc="Generating segments")):
-        preview = seg[:50] + "..." if len(seg) > 50 else seg
+    for batch_start in range(0, total, batch_size):
+        batch_segs = segments[batch_start:batch_start + batch_size]
+        batch_indices = list(range(batch_start, batch_start + len(batch_segs)))
+
         try:
-            sr, audio = generate_with_timeout(
-                engine.generate_voice_design, seg, language, instruct,
+            results = generate_with_timeout(
+                engine.batch_generate_voice_design,
+                batch_segs, language, instruct,
                 timeout_seconds=app_settings["timeout"],
                 **_gen_kwargs(),
             )
-            duration = len(audio) / sr
-            audio_parts.append((sr, audio))
-            table_rows.append([str(i + 1), preview, f"{duration:.1f}s"])
-            succeeded += 1
-        except Exception as e:
-            table_rows.append([str(i + 1), preview, f"Failed: {e}"])
-            failed += 1
+            for j, (sr, audio) in enumerate(results):
+                idx = batch_indices[j]
+                seg = batch_segs[j]
+                preview = seg[:50] + "..." if len(seg) > 50 else seg
+                duration = len(audio) / sr
+                audio_parts.append((sr, audio))
+                table_rows.append([str(idx + 1), preview, f"{duration:.1f}s"])
+                succeeded += 1
+                progress((batch_start + j + 1) / total, desc="Generating segments")
+        except Exception:
+            # Batch failed — retry each segment individually
+            for j, seg in enumerate(batch_segs):
+                idx = batch_indices[j]
+                preview = seg[:50] + "..." if len(seg) > 50 else seg
+                try:
+                    sr, audio = generate_with_timeout(
+                        engine.generate_voice_design, seg, language, instruct,
+                        timeout_seconds=app_settings["timeout"],
+                        **_gen_kwargs(),
+                    )
+                    duration = len(audio) / sr
+                    audio_parts.append((sr, audio))
+                    table_rows.append([str(idx + 1), preview, f"{duration:.1f}s"])
+                    succeeded += 1
+                except Exception as e:
+                    table_rows.append([str(idx + 1), preview, f"Failed: {e}"])
+                    failed += 1
+                progress((batch_start + j + 1) / total, desc="Generating segments")
 
     if not audio_parts:
         return None, table_rows, "All segments failed"
@@ -539,7 +590,7 @@ def _run_batch_voice_design(text, language, instruct, split_mode, silence_ms, pr
         mode="voice_design", text=f"[Batch: {succeeded} segments]",
         language=language, audio=combined, voice_params=f"batch ({split_mode})",
     )
-    status_msg = f"Generated {succeeded}/{len(segments)} segments"
+    status_msg = f"Generated {succeeded}/{total} segments"
     if failed:
         status_msg += f" ({failed} failed)"
     return gr.update(value=combined), table_rows, status_msg
