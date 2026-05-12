@@ -699,6 +699,45 @@ def parse_script_handler(raw_text):
     return updates, "\n".join(summary_parts), speaker_info
 
 
+def _batch_custom_voice_for_script(engine, texts, speakers, language, instructs, **kwargs):
+    """Batch generate for script mode — supports per-line speakers and instructs."""
+    engine._acquire_lock()
+    try:
+        engine._load_model("custom_voice")
+        results = list(
+            engine.current_model.batch_generate(
+                texts=texts,
+                voices=speakers,
+                instructs=instructs,
+                lang_code=language,
+                **kwargs,
+            )
+        )
+        results.sort(key=lambda r: r.sequence_idx)
+        return [engine._to_numpy(r) for r in results]
+    finally:
+        engine._lock.release()
+
+
+def _batch_voice_design_for_script(engine, texts, language, instructs, **kwargs):
+    """Batch generate for script mode — supports per-line instructs."""
+    engine._acquire_lock()
+    try:
+        engine._load_model("voice_design")
+        results = list(
+            engine.current_model.batch_generate(
+                texts=texts,
+                instructs=instructs,
+                lang_code=language,
+                **kwargs,
+            )
+        )
+        results.sort(key=lambda r: r.sequence_idx)
+        return [engine._to_numpy(r) for r in results]
+    finally:
+        engine._lock.release()
+
+
 def generate_script_handler(raw_text, assignments_state, silence_ms, progress=gr.Progress()):
     """Generate audio for a parsed multi-speaker script.
 
@@ -737,59 +776,136 @@ def generate_script_handler(raw_text, assignments_state, silence_ms, progress=gr
 
     for model_type, lines in groups.items():
         label = model_type_labels.get(model_type, model_type)
-        line_nums = [str(l.line_number) for l in lines]
-        progress(done / total_lines, desc=f"Generating {label} lines ({', '.join(line_nums)})...")
+        batch_size = app_settings["batch_size"]
 
-        for line in lines:
-            assignment = assignments_state.get(line.speaker, {})
-            mode = assignment.get("mode", "custom_voice")
-            lang = assignment.get("language", "English")
+        if model_type in ("custom_voice", "voice_design") and batch_size > 1:
+            # Batch generation for Custom Voice and Voice Design
+            for batch_start in range(0, len(lines), batch_size):
+                batch_lines = lines[batch_start:batch_start + batch_size]
+                texts = [l.text for l in batch_lines]
 
-            try:
-                if mode == "custom_voice":
-                    sr, audio = generate_with_timeout(
-                        engine.generate_custom_voice,
-                        line.text,
-                        assignment.get("speaker", DEFAULT_SPEAKERS[0]),
-                        lang,
-                        assignment.get("instruct", ""),
-                        timeout_seconds=app_settings["timeout"],
-                        **_gen_kwargs(),
-                    )
-                elif mode == "voice_design":
-                    sr, audio = generate_with_timeout(
-                        engine.generate_voice_design,
-                        line.text,
-                        lang,
-                        assignment.get("instruct", ""),
-                        timeout_seconds=app_settings["timeout"],
-                        **_gen_kwargs(),
-                    )
-                elif mode == "voice_clone":
-                    lib_voice = assignment.get("library_voice", "")
-                    if not lib_voice or lib_voice == "None":
-                        raise ValueError("No library voice selected for clone mode")
-                    voice = library.load_voice(lib_voice)
-                    ref_audio_path = library.get_ref_audio_path(lib_voice)
-                    ref_text = voice["ref_text"]
-                    sr, audio = generate_with_timeout(
-                        engine.generate_voice_clone,
-                        line.text, ref_audio_path, ref_text, lang,
-                        denoise_ref=app_settings["denoise_ref"],
-                        timeout_seconds=app_settings["timeout"],
-                        **_gen_kwargs(),
-                    )
-                else:
-                    raise ValueError(f"Unknown mode: {mode}")
+                try:
+                    if model_type == "custom_voice":
+                        speakers = []
+                        instructs = []
+                        lang = None
+                        for line in batch_lines:
+                            assignment = assignments_state.get(line.speaker, {})
+                            lang = assignment.get("language", "English")
+                            speakers.append(assignment.get("speaker", DEFAULT_SPEAKERS[0]))
+                            instructs.append(assignment.get("instruct", ""))
 
-                audio_by_line_number[line.line_number] = (sr, audio)
-                succeeded += 1
-            except Exception as e:
-                audio_by_line_number[line.line_number] = None
-                failed += 1
+                        results = generate_with_timeout(
+                            _batch_custom_voice_for_script,
+                            engine, texts, speakers, lang, instructs,
+                            timeout_seconds=app_settings["timeout"],
+                            **_gen_kwargs(),
+                        )
+                    else:  # voice_design
+                        instructs = []
+                        lang = None
+                        for line in batch_lines:
+                            assignment = assignments_state.get(line.speaker, {})
+                            lang = assignment.get("language", "English")
+                            instructs.append(assignment.get("instruct", ""))
 
-            done += 1
-            progress(done / total_lines)
+                        results = generate_with_timeout(
+                            _batch_voice_design_for_script,
+                            engine, texts, lang, instructs,
+                            timeout_seconds=app_settings["timeout"],
+                            **_gen_kwargs(),
+                        )
+
+                    for j, (sr, audio) in enumerate(results):
+                        audio_by_line_number[batch_lines[j].line_number] = (sr, audio)
+                        succeeded += 1
+                        done += 1
+                        progress(done / total_lines, desc=f"Generating {label} lines...")
+
+                except Exception:
+                    # Batch failed — retry each line individually
+                    for line in batch_lines:
+                        assignment = assignments_state.get(line.speaker, {})
+                        lang = assignment.get("language", "English")
+                        try:
+                            if model_type == "custom_voice":
+                                sr, audio = generate_with_timeout(
+                                    engine.generate_custom_voice,
+                                    line.text,
+                                    assignment.get("speaker", DEFAULT_SPEAKERS[0]),
+                                    lang,
+                                    assignment.get("instruct", ""),
+                                    timeout_seconds=app_settings["timeout"],
+                                    **_gen_kwargs(),
+                                )
+                            else:
+                                sr, audio = generate_with_timeout(
+                                    engine.generate_voice_design,
+                                    line.text,
+                                    lang,
+                                    assignment.get("instruct", ""),
+                                    timeout_seconds=app_settings["timeout"],
+                                    **_gen_kwargs(),
+                                )
+                            audio_by_line_number[line.line_number] = (sr, audio)
+                            succeeded += 1
+                        except Exception:
+                            audio_by_line_number[line.line_number] = None
+                            failed += 1
+                        done += 1
+                        progress(done / total_lines)
+        else:
+            # Sequential generation (Voice Clone, or batch_size == 1)
+            for line in lines:
+                assignment = assignments_state.get(line.speaker, {})
+                mode = assignment.get("mode", "custom_voice")
+                lang = assignment.get("language", "English")
+
+                try:
+                    if mode == "custom_voice":
+                        sr, audio = generate_with_timeout(
+                            engine.generate_custom_voice,
+                            line.text,
+                            assignment.get("speaker", DEFAULT_SPEAKERS[0]),
+                            lang,
+                            assignment.get("instruct", ""),
+                            timeout_seconds=app_settings["timeout"],
+                            **_gen_kwargs(),
+                        )
+                    elif mode == "voice_design":
+                        sr, audio = generate_with_timeout(
+                            engine.generate_voice_design,
+                            line.text,
+                            lang,
+                            assignment.get("instruct", ""),
+                            timeout_seconds=app_settings["timeout"],
+                            **_gen_kwargs(),
+                        )
+                    elif mode == "voice_clone":
+                        lib_voice = assignment.get("library_voice", "")
+                        if not lib_voice or lib_voice == "None":
+                            raise ValueError("No library voice selected for clone mode")
+                        voice = library.load_voice(lib_voice)
+                        ref_audio_path = library.get_ref_audio_path(lib_voice)
+                        ref_text = voice["ref_text"]
+                        sr, audio = generate_with_timeout(
+                            engine.generate_voice_clone,
+                            line.text, ref_audio_path, ref_text, lang,
+                            denoise_ref=app_settings["denoise_ref"],
+                            timeout_seconds=app_settings["timeout"],
+                            **_gen_kwargs(),
+                        )
+                    else:
+                        raise ValueError(f"Unknown mode: {mode}")
+
+                    audio_by_line_number[line.line_number] = (sr, audio)
+                    succeeded += 1
+                except Exception:
+                    audio_by_line_number[line.line_number] = None
+                    failed += 1
+
+                done += 1
+                progress(done / total_lines)
 
     # Reassemble in script order and build results table
     audio_segments = []
