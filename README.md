@@ -6,7 +6,7 @@ Local text-to-speech and speech recognition on Apple Silicon, powered by [Qwen3-
 
 ## Requirements
 
-- A Mac with Apple Silicon (M1, M2, M3, or M4)
+- A Mac with Apple Silicon (M1, M2, M3, M4, or M5)
 - Python 3.10 or newer (3.12 recommended)
 - [Homebrew](https://brew.sh) (the installer uses it to set up dependencies)
 
