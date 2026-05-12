@@ -136,6 +136,55 @@ class TTSEngine:
                 os.remove(tmp_denoised)
             self._lock.release()
 
+    def batch_generate_custom_voice(self, texts, speaker, language, instruct="", **kwargs):
+        """Generate audio for multiple texts in one batched forward pass.
+
+        Returns list of (sample_rate, numpy_audio_array) in input order.
+        """
+        self._acquire_lock()
+        try:
+            self._load_model("custom_voice")
+            batch_size = len(texts)
+            speakers = [speaker] * batch_size
+            instructs = [instruct] * batch_size
+            results = list(
+                self.current_model.batch_generate(
+                    texts=texts,
+                    voices=speakers,
+                    instructs=instructs,
+                    lang_code=language,
+                    **kwargs,
+                )
+            )
+            # Sort by sequence_idx to guarantee input order
+            results.sort(key=lambda r: r.sequence_idx)
+            return [self._to_numpy(r) for r in results]
+        finally:
+            self._lock.release()
+
+    def batch_generate_voice_design(self, texts, language, instruct, **kwargs):
+        """Generate audio for multiple texts in one batched forward pass.
+
+        Returns list of (sample_rate, numpy_audio_array) in input order.
+        """
+        self._acquire_lock()
+        try:
+            self._load_model("voice_design")
+            batch_size = len(texts)
+            instructs = [instruct] * batch_size
+            results = list(
+                self.current_model.batch_generate(
+                    texts=texts,
+                    instructs=instructs,
+                    lang_code=language,
+                    **kwargs,
+                )
+            )
+            results.sort(key=lambda r: r.sequence_idx)
+            return [self._to_numpy(r) for r in results]
+        finally:
+            self._lock.release()
+
     # ----- ASR -----
 
     def _load_asr(self):
