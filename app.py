@@ -217,14 +217,17 @@ def _voice_choices():
 
 
 def _voice_table():
-    """Return voice data for the library dataframe."""
+    """Return voice data as a Markdown table string (gr.Dataframe is buggy; see project memory)."""
     voices = library.list_voices()
-    if not voices:
-        return [["(empty)", "", "", ""]]
-    return [
+    rows = [
         [v["name"], v.get("source", ""), v.get("language", ""), v.get("description", "")]
         for v in voices
     ]
+    return _format_table_md(
+        ["Name", "Source", "Language", "Description"],
+        rows,
+        "*No voices saved.*",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -738,6 +741,29 @@ def _batch_voice_design_for_script(engine, texts, language, instructs, **kwargs)
         engine._lock.release()
 
 
+def _format_table_md(headers, rows, empty_msg="*No entries.*"):
+    """Format rows as a Markdown table. Avoids gr.Dataframe AG Grid recursion bug."""
+    if not rows:
+        return empty_msg
+    out = [
+        "| " + " | ".join(headers) + " |",
+        "|" + "|".join(["---"] * len(headers)) + "|",
+    ]
+    for row in rows:
+        cells = [str(c).replace("|", "\\|") for c in row]
+        out.append("| " + " | ".join(cells) + " |")
+    return "\n".join(out)
+
+
+def _history_table_md():
+    """Return history data formatted as a Markdown table string."""
+    return _format_table_md(
+        ["ID", "Time", "Mode", "Text", "Duration"],
+        history.table_data(),
+        "*No history entries.*",
+    )
+
+
 def generate_script_handler(raw_text, assignments_state, silence_ms, progress=gr.Progress()):
     """Generate audio for a parsed multi-speaker script.
 
@@ -746,16 +772,16 @@ def generate_script_handler(raw_text, assignments_state, silence_ms, progress=gr
     """
     if not raw_text.strip():
         gr.Warning("Enter a script first.")
-        return None, [["(empty)", "", "", ""]], "Enter script first"
+        return None, "*Enter a script first.*", "Enter script first"
 
     parsed = parse_script(raw_text)
     if parsed.errors:
         gr.Warning(parsed.errors[0])
-        return None, [["(error)", "", "", ""]], parsed.errors[0]
+        return None, f"*{parsed.errors[0]}*", parsed.errors[0]
 
     if not assignments_state:
         gr.Warning("Parse the script and assign voices first.")
-        return None, [["(error)", "", "", ""]], "Parse script first"
+        return None, "*Parse the script and assign voices first.*", "Parse script first"
 
     # Group lines by model type for efficient model swapping
     groups = group_by_model_type(parsed.lines, assignments_state)
@@ -921,7 +947,7 @@ def generate_script_handler(raw_text, assignments_state, silence_ms, progress=gr
             table_rows.append([str(line.line_number), line.speaker, preview, "Failed"])
 
     if not audio_segments:
-        return None, table_rows, "All lines failed"
+        return None, _format_table_md(["Line", "Speaker", "Text", "Status"], table_rows, "*No results.*"), "All lines failed"
 
     combined = concatenate_audio(audio_segments, silence_ms=int(silence_ms))
     # Record to history
@@ -940,7 +966,7 @@ def generate_script_handler(raw_text, assignments_state, silence_ms, progress=gr
         status_msg += f" ({failed} failed)"
     if app_settings["denoise_ref"]:
         status_msg += " | Noise reduction applied"
-    return gr.update(value=combined), table_rows, status_msg
+    return gr.update(value=combined), _format_table_md(["Line", "Speaker", "Text", "Status"], table_rows, "*No results.*"), status_msg
 
 
 # ---------------------------------------------------------------------------
@@ -960,15 +986,15 @@ def history_preview(entry_id):
 def history_delete(entry_id):
     """Delete a single history entry."""
     if not entry_id or entry_id == "(empty)":
-        return history.table_data(), "Select an entry first"
+        return _history_table_md(), "Select an entry first"
     history.delete_entry(entry_id)
-    return history.table_data(), f"Deleted entry {entry_id}"
+    return _history_table_md(), f"Deleted entry {entry_id}"
 
 
 def history_clear():
     """Clear all history."""
     history.clear()
-    return history.table_data(), "History cleared"
+    return _history_table_md(), "History cleared"
 
 
 def history_save_audio(entry_id):
@@ -1795,12 +1821,7 @@ with gr.Blocks(title="Qwen3-TTS MLX Studio") as app:
 
                 with gr.Column(scale=1):
                     sm_audio = gr.Audio(label="Combined Output", type="numpy", interactive=False, buttons=["download"])
-                    sm_table = gr.Dataframe(
-                        headers=["Line", "Speaker", "Text", "Status"],
-                        value=[["", "", "", ""]],
-                        label="Script Results",
-                        interactive=False,
-                    )
+                    sm_table = gr.Markdown(value="*Results will appear after generation.*", label="Script Results")
                     sm_status = gr.Textbox(label="Status", interactive=False)
 
         # =================================================================
@@ -1852,13 +1873,7 @@ with gr.Blocks(title="Qwen3-TTS MLX Studio") as app:
         with gr.Tab("Voice Library"):
             with gr.Row():
                 with gr.Column(scale=2):
-                    lib_table = gr.Dataframe(
-                        headers=["Name", "Source", "Language", "Description"],
-                        value=_voice_table(),
-                        label="Saved Voices",
-                        interactive=False,
-                        max_height=300,
-                    )
+                    lib_table = gr.Markdown(value=_voice_table(), label="Saved Voices")
                     with gr.Row():
                         lib_selected = gr.Textbox(
                             label="Voice Name",
@@ -1898,14 +1913,7 @@ with gr.Blocks(title="Qwen3-TTS MLX Studio") as app:
         # Tab 8: History
         # =================================================================
         with gr.Tab("History"):
-            hist_table = gr.Dataframe(
-                headers=["ID", "Time", "Mode", "Text", "Duration"],
-                value=history.table_data(),
-                label="Generation History",
-                interactive=False,
-                elem_classes=["history-table"],
-                max_height=360,
-            )
+            hist_table = gr.Markdown(value=_history_table_md(), label="Generation History", elem_classes=["history-table"])
             with gr.Row():
                 hist_selected = gr.Textbox(
                     label="Entry ID",
