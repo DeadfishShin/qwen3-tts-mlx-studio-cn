@@ -1818,10 +1818,11 @@ with gr.Blocks(title="Qwen3-TTS MLX Studio") as app:
                     with gr.Row():
                         sm_generate_btn = gr.Button("Generate Script", variant="primary")
                         sm_save_btn = gr.Button("Save Combined Audio")
+                    with gr.Accordion("Per-line breakdown", open=False):
+                        sm_table = gr.Markdown(value="*Results will appear after generation.*")
 
                 with gr.Column(scale=1):
                     sm_audio = gr.Audio(label="Combined Output", type="numpy", interactive=False, buttons=["download"])
-                    sm_table = gr.Markdown(value="*Results will appear after generation.*", label="Script Results")
                     sm_status = gr.Textbox(label="Status", interactive=False)
 
         # =================================================================

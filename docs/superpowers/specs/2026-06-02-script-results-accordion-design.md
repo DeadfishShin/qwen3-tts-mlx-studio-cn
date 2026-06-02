@@ -16,7 +16,7 @@ Wrap the existing `sm_table` (`gr.Markdown`) inside a collapsed-by-default `gr.A
 
 - Default state: collapsed (`open=False`)
 - Label: `"Per-line breakdown"`
-- Position: right column of Script Mode, between `sm_audio` and `sm_status` (unchanged location)
+- Position: bottom of the **left** column of Script Mode, immediately under the Generate / Save buttons row. (Originally placed in the narrow right column; moved to the wider left column during iteration so the table renders readably when expanded and stays out of the way of the audio output and progress overlay.)
 - Behavior on re-generate: accordion stays in whatever state the user left it. No auto-collapse, no auto-expand.
 
 ## Why this fixes both problems
@@ -30,13 +30,20 @@ Wrap the existing `sm_table` (`gr.Markdown`) inside a collapsed-by-default `gr.A
 
 ## Implementation outline
 
-Single change in `app.py` around the existing `sm_table` definition (currently at line 1813):
+In `app.py`, add the accordion at the bottom of the left column (after the Generate / Save buttons row), and leave the right column with just audio + status:
 
 ```python
-sm_audio = gr.Audio(...)                                     # unchanged
+# Left column (scale=2):
+with gr.Row():
+    sm_generate_btn = gr.Button("Generate Script", variant="primary")
+    sm_save_btn = gr.Button("Save Combined Audio")
 with gr.Accordion("Per-line breakdown", open=False):
     sm_table = gr.Markdown(value="*Results will appear after generation.*")
-sm_status = gr.Textbox(...)                                  # unchanged
+
+# Right column (scale=1):
+with gr.Column(scale=1):
+    sm_audio = gr.Audio(...)
+    sm_status = gr.Textbox(...)
 ```
 
 - No handler changes — `sm_table` keeps its name and component identity, so the existing return paths in `generate_script_handler` and `_parse_and_update_slots` still target it correctly.
