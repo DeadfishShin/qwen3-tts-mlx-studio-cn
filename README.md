@@ -34,7 +34,7 @@ If you don't have Homebrew yet, open Terminal and paste:
 
 **History** — Every generation is logged with mode, language, text, and duration. Replay audio, save files, or view original parameters.
 
-**Settings** — Model size and quantization, generation parameters (temperature, top-k, top-p, repetition penalty, max tokens, timeout), output directory, auto-save toggle, export format (WAV/MP3/OGG) with MP3 bitrate selector, post-processing (EBU R128 loudness normalization, silence trimming, reference audio denoising via DeepFilterNet), JIT compilation toggle, ASR model management, YT cache management, and model cache management (view/delete downloaded models).
+**Settings** — Model size and quantization, generation parameters (temperature, top-k, top-p, repetition penalty, max tokens, timeout), batch size (segments processed in parallel for Custom Voice & Voice Design batch/script modes), output directory, auto-save toggle, export format (WAV/MP3/OGG) with MP3 bitrate selector, post-processing (EBU R128 loudness normalization, silence trimming, reference audio denoising via DeepFilterNet), JIT compilation toggle, ASR model management, YT cache management, and model cache management (view/delete downloaded models).
 
 ## Setup
 
