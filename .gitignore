@@ -8,3 +8,12 @@ voices/
 .gum_bin/
 .claude/
 CLAUDE.md
+docs/superpowers/
+.env
+.env.*
+*.log
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.vscode/
+.idea/
