@@ -55,6 +55,27 @@ VD_INSTRUCT = "Voice Description"
 VD_INSTRUCT_PLACEHOLDER = "e.g. A deep, calm male narrator with a British accent"
 VD_LIB_NAME_PLACEHOLDER = "my_narrator"
 
+# --- Voice Cloning tab ---
+TAB_VOICE_CLONE = "Voice Cloning"
+VC_NOTICE_HTML = (
+    "<div class='info-notice'>"
+    "<strong>Reference transcript must exactly match what is spoken in the audio.</strong> "
+    "Use a clean 3–30 second clip for best results."
+    "</div>"
+)
+VC_LIBRARY_VOICE = "Load from Library"
+VC_REF_AUDIO = "Reference Audio"
+VC_TRANSCRIBE = "Transcribe Reference"
+VC_TRANSCRIBE_HINT_HTML = "<div class='text-hint'>Auto-fills transcript using Qwen3-ASR-1.7B-8bit</div>"
+VC_REF_TEXT = "Reference Transcript (required)"
+VC_REF_TEXT_PLACEHOLDER = "Exact text spoken in reference audio"
+VC_TEXT_LABEL = "Text to Speak"
+VC_TEXT_PLACEHOLDER = "Enter text to speak in the cloned voice..."
+VC_LIB_NAME_PLACEHOLDER = "my_clone"
+
+# --- Transcription tab ---
+TAB_TRANSCRIPTION = "Transcription"
+
 # --- Table empty states ---
 NO_VOICES = "*No voices saved.*"
 NO_HISTORY = "*No history entries.*"

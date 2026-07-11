@@ -60,6 +60,8 @@ from script_parser import parse_script, group_by_model_type
 from state import AppContext, AppSettings
 from theme import build_theme, custom_css
 from ui.tabs import custom_voice as cv_tab
+from ui.tabs import transcription as asr_tab
+from ui.tabs import voice_clone as vc_tab
 from ui.tabs import voice_design as vd_tab
 from voice_library import VoiceLibrary
 from yt_voice import get_yt_extractor
@@ -242,89 +244,9 @@ def _voice_table():
 # ---------------------------------------------------------------------------
 # Generation handlers
 # ---------------------------------------------------------------------------
-def generate_voice_clone(text, ref_audio, ref_text, language, library_voice):
-    if not text.strip():
-        gr.Warning("Please enter text to speak.")
-        yield None, "Enter text first"
-        return
-    # If library voice selected, override ref_audio/ref_text
-    if library_voice and library_voice != "None":
-        try:
-            voice = library.load_voice(library_voice)
-            ref_audio = library.get_ref_audio_path(library_voice)
-            ref_text = voice["ref_text"]
-        except FileNotFoundError:
-            gr.Warning(f"Voice '{library_voice}' not found in library.")
-            yield None, "Voice not found"
-            return
-    if not ref_audio:
-        gr.Warning("Please upload reference audio or select from library.")
-        yield None, "No reference audio"
-        return
-    if not ref_text or not ref_text.strip():
-        gr.Warning("Reference transcript is required for voice cloning.")
-        yield None, "No reference transcript"
-        return
-    if not engine.is_model_loaded("base"):
-        repo_id = engine.get_repo_id("base")
-        if _is_model_cached(repo_id):
-            yield None, f"Loading model into memory… ({repo_id})"
-        else:
-            yield None, (
-                f"Downloading model on first run (~6 GB) — this may take several minutes… ({repo_id})"
-            )
-    try:
-        start = time.time()
-        sr, audio = generate_with_timeout(
-            engine.generate_voice_clone, text, ref_audio, ref_text, language,
-            denoise_ref=app_settings["denoise_ref"],
-            timeout_seconds=app_settings["timeout"],
-            **_gen_kwargs(),
-        )
-        elapsed = time.time() - start
-        result = (sr, audio)
-        # Record to history
-        voice_info = library_voice if library_voice and library_voice != "None" else "uploaded"
-        history.add(
-            mode="voice_clone", text=text, language=language,
-            audio=result, voice_params=f"ref: {voice_info}",
-        )
-        save_msg = ""
-        if app_settings["autosave"]:
-            save_msg = " | " + save_audio(result, "clone")
-        denoise_msg = " | Noise reduction applied" if app_settings["denoise_ref"] else ""
-        yield (
-            gr.update(value=result),
-            f"Generated in {elapsed:.1f}s | Model: {engine.get_repo_id('base')}{denoise_msg}{save_msg}",
-        )
-    except GenerationTimeout as e:
-        gr.Warning(str(e))
-        yield None, str(e)
-    except Exception as e:
-        gr.Warning(f"Generation failed: {e}")
-        yield None, f"Error: {e}"
-
-
 # ---------------------------------------------------------------------------
 # ASR transcription handlers
 # ---------------------------------------------------------------------------
-def transcribe_reference(ref_audio):
-    """Transcribe reference audio and fill the transcript box."""
-    if not ref_audio:
-        gr.Warning("Upload reference audio first.")
-        return gr.update(), "No audio to transcribe"
-    yield gr.update(), "Loading ASR model..."
-    try:
-        text = engine.transcribe(ref_audio, language="auto")
-        if not text or not text.strip():
-            yield gr.update(), "Transcription returned empty — try a clearer clip"
-            return
-        yield gr.update(value=text.strip()), f"Transcribed ({len(text.split())} words)"
-    except Exception as e:
-        gr.Warning(f"Transcription failed: {e}")
-        yield gr.update(), f"Error: {e}"
-
-
 def transcribe_yt_clip(clip_audio):
     """Transcribe extracted YT clip audio."""
     if not clip_audio:
@@ -342,104 +264,9 @@ def transcribe_yt_clip(clip_audio):
         yield gr.update(), f"Error: {e}"
 
 
-def transcribe_audio(audio_path, language):
-    """Standalone transcription handler."""
-    if not audio_path:
-        gr.Warning("Upload or record audio first.")
-        return gr.update(), "No audio"
-    lang = "auto" if language == "Auto" else language
-    yield gr.update(), "Loading ASR model..."
-    try:
-        text = engine.transcribe(audio_path, language=lang)
-        if not text or not text.strip():
-            yield gr.update(), "Transcription returned empty"
-            return
-        yield gr.update(value=text.strip()), f"Transcribed ({len(text.strip().split())} words)"
-    except Exception as e:
-        gr.Warning(f"Transcription failed: {e}")
-        yield gr.update(), f"Error: {e}"
-
-
-def save_transcript(text):
-    """Save transcription text to .txt file."""
-    if not text or not text.strip():
-        gr.Warning("No transcription to save.")
-        return "Nothing to save"
-    out_dir = app_settings["output_dir"]
-    os.makedirs(out_dir, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = os.path.join(out_dir, f"transcript_{timestamp}.txt")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
-    return f"Saved: {path}"
-
-
 # ---------------------------------------------------------------------------
 # Batch generation handlers
 # ---------------------------------------------------------------------------
-def _run_batch_voice_clone(text, ref_audio, ref_text, language, library_voice, split_mode, silence_ms, progress=gr.Progress()):
-    # Resolve library voice
-    if library_voice and library_voice != "None":
-        try:
-            voice = library.load_voice(library_voice)
-            ref_audio = library.get_ref_audio_path(library_voice)
-            ref_text = voice["ref_text"]
-        except FileNotFoundError:
-            gr.Warning(f"Voice '{library_voice}' not found.")
-            return None, [["(error)", "", ""]], "Voice not found"
-    if not ref_audio:
-        gr.Warning("No reference audio.")
-        return None, [["(error)", "", ""]], "No reference audio"
-    if not ref_text or not ref_text.strip():
-        gr.Warning("Reference transcript required.")
-        return None, [["(error)", "", ""]], "No transcript"
-
-    segments = split_text(text, split_mode)
-    if not segments:
-        gr.Warning("No text segments found.")
-        return None, [["(empty)", "", ""]], "No segments"
-    if len(segments) > MAX_BATCH_SEGMENTS:
-        gr.Warning(f"Too many segments ({len(segments)}). Max is {MAX_BATCH_SEGMENTS}.")
-        return None, [["(error)", "", ""]], f"Too many segments (max {MAX_BATCH_SEGMENTS})"
-
-    audio_parts = []
-    table_rows = []
-    succeeded, failed = 0, 0
-
-    for i, seg in enumerate(progress.tqdm(segments, desc="Generating segments")):
-        preview = seg[:50] + "..." if len(seg) > 50 else seg
-        try:
-            sr, audio = generate_with_timeout(
-                engine.generate_voice_clone, seg, ref_audio, ref_text, language,
-                denoise_ref=app_settings["denoise_ref"],
-                timeout_seconds=app_settings["timeout"],
-                **_gen_kwargs(),
-            )
-            duration = len(audio) / sr
-            audio_parts.append((sr, audio))
-            table_rows.append([str(i + 1), preview, f"{duration:.1f}s"])
-            succeeded += 1
-        except Exception as e:
-            table_rows.append([str(i + 1), preview, f"Failed: {e}"])
-            failed += 1
-
-    if not audio_parts:
-        return None, table_rows, "All segments failed"
-
-    combined = concatenate_audio(audio_parts, silence_ms=int(silence_ms))
-    voice_info = library_voice if library_voice and library_voice != "None" else "uploaded"
-    history.add(
-        mode="voice_clone", text=f"[Batch: {succeeded} segments]",
-        language=language, audio=combined, voice_params=f"batch ref: {voice_info}",
-    )
-    status_msg = f"Generated {succeeded}/{len(segments)} segments"
-    if failed:
-        status_msg += f" ({failed} failed)"
-    if app_settings["denoise_ref"]:
-        status_msg += " | Noise reduction applied"
-    return gr.update(value=combined), table_rows, status_msg
-
-
 # ---------------------------------------------------------------------------
 # Script mode handlers
 # ---------------------------------------------------------------------------
@@ -807,26 +634,6 @@ def history_regenerate(entry_id):
 # ---------------------------------------------------------------------------
 # Save-to-library handlers
 # ---------------------------------------------------------------------------
-def save_clone_to_library(ref_audio, ref_text, name, language):
-    if not ref_audio:
-        gr.Warning("No reference audio to save.")
-        return "No reference audio"
-    if not name.strip():
-        gr.Warning("Please enter a name for this voice.")
-        return "Enter a voice name"
-    if not ref_text or not ref_text.strip():
-        gr.Warning("Reference transcript is required.")
-        return "Enter transcript"
-    library.save_voice(
-        name=name,
-        ref_audio_path=ref_audio,
-        ref_text=ref_text,
-        language=language,
-        source="clone",
-    )
-    return f"Voice '{name}' saved to library"
-
-
 # ---------------------------------------------------------------------------
 # YT Voice Clone handlers
 # ---------------------------------------------------------------------------
@@ -965,8 +772,8 @@ def clone_yt_voice(text, ref_audio, transcript, language, voice_name):
             **_gen_kwargs(),
         )
         elapsed = time.time() - t0
-        lib_msg = save_clone_to_library(
-            ref_audio, transcript.strip(), voice_name.strip(), language
+        lib_msg = vc_tab.save_clone_to_library(
+            ctx, ref_audio, transcript.strip(), voice_name.strip(), language
         )
         history.add(
             mode="voice_clone",
@@ -1202,89 +1009,7 @@ with gr.Blocks(title="Qwen3-TTS MLX Studio") as app:
         ui_ns.cv = cv_tab.build(ctx)
         ui_ns.vd = vd_tab.build(ctx)
 
-        # =================================================================
-        # Tab 3: Voice Cloning
-        # =================================================================
-        with gr.Tab("Voice Cloning"):
-            gr.HTML(
-                "<div class='info-notice'>"
-                "<strong>Reference transcript must exactly match what is spoken in the audio.</strong> "
-                "Use a clean 3–30 second clip for best results."
-                "</div>"
-            )
-            with gr.Row():
-                with gr.Column(scale=2):
-                    with gr.Row():
-                        vc_language = gr.Dropdown(
-                            choices=LANGUAGES, value="English", label="Language"
-                        )
-                        vc_library_voice = gr.Dropdown(
-                            choices=_voice_choices(),
-                            value="None",
-                            label="Load from Library",
-                        )
-                    vc_ref_audio = gr.Audio(
-                        label="Reference Audio",
-                        type="filepath",
-                        sources=["upload", "microphone"],
-                        buttons=["download"],
-                    )
-                    with gr.Row():
-                        vc_transcribe_btn = gr.Button("Transcribe Reference", variant="secondary", scale=1)
-                    gr.HTML("<div class='text-hint'>Auto-fills transcript using Qwen3-ASR-1.7B-8bit</div>")
-                    vc_ref_text = gr.Textbox(
-                        label="Reference Transcript (required)",
-                        lines=2,
-                        placeholder="Exact text spoken in reference audio",
-                    )
-                    vc_text = gr.Textbox(
-                        label="Text to Speak",
-                        lines=5,
-                        placeholder="Enter text to speak in the cloned voice...",
-                    )
-                    vc_generate = gr.Button("Generate", variant="primary")
-                    with gr.Accordion("Save to Voice Library", open=False, elem_classes=["lib-save-accordion"]):
-                        with gr.Row():
-                            vc_lib_name = gr.Textbox(
-                                label="Voice Name", placeholder="my_clone", scale=2
-                            )
-                            vc_lib_save = gr.Button("Save Voice to Library", scale=1)
-                        vc_lib_status = gr.Textbox(
-                            show_label=False, interactive=False,
-                            placeholder="Library status…",
-                            elem_classes=["save-status-text"],
-                        )
-                    # Batch Mode Accordion
-                    with gr.Accordion("Batch Mode", open=False, elem_classes=["batch-accordion"]):
-                        with gr.Row():
-                            vc_batch_split = gr.Radio(
-                                ["paragraph", "sentence", "line"],
-                                value=DEFAULT_BATCH_SPLIT_MODE,
-                                label="Split Mode",
-                            )
-                            vc_batch_silence = gr.Slider(
-                                0, 2000, value=DEFAULT_SILENCE_GAP_MS, step=50,
-                                label="Silence Gap (ms)",
-                            )
-                        vc_batch_generate = gr.Button("Generate Batch", variant="primary")
-                        vc_batch_table = gr.Dataframe(
-                            headers=["#", "Text", "Status"],
-                            value=[["", "", ""]],
-                            label="Batch Results",
-                            interactive=False,
-                        )
-                        vc_batch_audio = gr.Audio(label="Combined Output", type="numpy", interactive=False, buttons=["download"])
-                        with gr.Row():
-                            vc_batch_save = gr.Button("Save Combined Audio")
-                            vc_batch_status = gr.Textbox(label="Batch Status", interactive=False)
-                with gr.Column(scale=1, elem_classes=["output-col"]):
-                    vc_audio = gr.Audio(label="Output", type="numpy", interactive=False, buttons=["download"])
-                    vc_save = gr.Button("Save Audio")
-                    vc_save_status = gr.Textbox(
-                        show_label=False, interactive=False,
-                        placeholder="Save path appears here…",
-                        elem_classes=["save-status-text"],
-                    )
+        ui_ns.vc = vc_tab.build(ctx)
 
         # =================================================================
         # Tab 4: YT Voice Clone
@@ -1457,48 +1182,7 @@ with gr.Blocks(title="Qwen3-TTS MLX Studio") as app:
                     sm_audio = gr.Audio(label="Combined Output", type="numpy", interactive=False, buttons=["download"])
                     sm_status = gr.Textbox(label="Status", interactive=False)
 
-        # =================================================================
-        # Tab 6: Transcription
-        # =================================================================
-        with gr.Tab("Transcription"):
-            gr.HTML(
-                "<div class='info-notice'>"
-                "Transcribe audio files locally using Qwen3-ASR. "
-                "Supports up to ~20 minutes of audio."
-                "</div>"
-            )
-            with gr.Row():
-                with gr.Column(scale=2):
-                    asr_audio = gr.Audio(
-                        label="Upload Audio",
-                        type="filepath",
-                        sources=["upload", "microphone"],
-                    )
-                    with gr.Row():
-                        asr_language = gr.Dropdown(
-                            choices=["Auto"] + LANGUAGES,
-                            value="Auto",
-                            label="Language",
-                        )
-                    asr_transcribe_btn = gr.Button("Transcribe", variant="primary")
-                    asr_output = gr.Textbox(
-                        label="Transcription",
-                        lines=12,
-                    )
-                    with gr.Row():
-                        asr_save_btn = gr.Button("Save as .txt")
-                        asr_save_status = gr.Textbox(
-                            show_label=False, interactive=False,
-                            placeholder="Save path appears here...",
-                            elem_classes=["save-status-text"],
-                        )
-                with gr.Column(scale=1, elem_classes=["output-col"]):
-                    asr_info = gr.Markdown(
-                        "**Model:** Qwen3-ASR-1.7B-8bit\n\n"
-                        "**Supported languages:** Auto-detect, English, Chinese, Japanese, Korean, "
-                        "German, French, Russian, Portuguese, Spanish, Italian\n\n"
-                        "**Max duration:** ~20 minutes per file"
-                    )
+        ui_ns.asr = asr_tab.build(ctx)
 
         # =================================================================
         # Tab 7: Voice Library
@@ -1749,59 +1433,10 @@ with gr.Blocks(title="Qwen3-TTS MLX Studio") as app:
     # ===================================================================
 
     ui_ns.status = status
-    ui_ns.vc = types.SimpleNamespace(vc_library_voice=vc_library_voice)
     cv_tab.wire(ctx, ui_ns)
     vd_tab.wire(ctx, ui_ns)
 
-    # --- Voice Cloning ---
-    vc_transcribe_btn.click(
-        fn=transcribe_reference,
-        inputs=[vc_ref_audio],
-        outputs=[vc_ref_text, status],
-        show_progress="minimal",
-    )
-    vc_generate.click(
-        fn=generate_voice_clone,
-        inputs=[vc_text, vc_ref_audio, vc_ref_text, vc_language, vc_library_voice],
-        outputs=[vc_audio, status],
-        show_progress="minimal",
-    )
-    vc_save.click(
-        fn=lambda audio: save_audio(audio, "clone"),
-        inputs=[vc_audio],
-        outputs=[vc_save_status],
-    )
-    vc_batch_generate.click(
-        fn=_run_batch_voice_clone,
-        inputs=[vc_text, vc_ref_audio, vc_ref_text, vc_language, vc_library_voice,
-                vc_batch_split, vc_batch_silence],
-        outputs=[vc_batch_audio, vc_batch_table, vc_batch_status],
-        show_progress="full",
-    )
-    vc_batch_save.click(
-        fn=lambda audio: save_audio(audio, "batch_clone"),
-        inputs=[vc_batch_audio],
-        outputs=[vc_batch_status],
-    )
-
-    def _save_clone_and_refresh(*args):
-        result = save_clone_to_library(*args)
-        return result, gr.update(choices=_voice_choices())
-
-    vc_lib_save.click(
-        fn=_save_clone_and_refresh,
-        inputs=[vc_ref_audio, vc_ref_text, vc_lib_name, vc_language],
-        outputs=[vc_lib_status, vc_library_voice],
-    )
-
-    # Refresh library dropdown when clone tab is selected
-    def refresh_clone_library():
-        return gr.update(choices=_voice_choices(), value="None")
-
-    vc_library_voice.focus(
-        fn=refresh_clone_library,
-        outputs=[vc_library_voice],
-    )
+    vc_tab.wire(ctx, ui_ns)
 
     # --- YT Voice Clone ---
     yt_fetch_btn.click(
@@ -1826,22 +1461,11 @@ with gr.Blocks(title="Qwen3-TTS MLX Studio") as app:
     yt_clone_btn.click(
         fn=clone_yt_voice,
         inputs=[yt_text, yt_clip_audio, yt_transcript, yt_language, yt_voice_name],
-        outputs=[yt_audio_out, status, yt_status, vc_library_voice, lib_table],
+        outputs=[yt_audio_out, status, yt_status, ui_ns.vc.vc_library_voice, lib_table],
         show_progress="minimal",
     )
 
-    # --- Transcription ---
-    asr_transcribe_btn.click(
-        fn=transcribe_audio,
-        inputs=[asr_audio, asr_language],
-        outputs=[asr_output, status],
-        show_progress="minimal",
-    )
-    asr_save_btn.click(
-        fn=save_transcript,
-        inputs=[asr_output],
-        outputs=[asr_save_status],
-    )
+    asr_tab.wire(ctx, ui_ns)
 
     # --- Script Mode ---
     def _parse_and_update_slots(raw_text):
@@ -2037,7 +1661,7 @@ with gr.Blocks(title="Qwen3-TTS MLX Studio") as app:
         ],
         outputs=[
             set_status, status,
-            ui_ns.cv.cv_language, ui_ns.vd.vd_language, vc_language, yt_language, asr_language, lib_import_language,
+            ui_ns.cv.cv_language, ui_ns.vd.vd_language, ui_ns.vc.vc_language, yt_language, ui_ns.asr.asr_language, lib_import_language,
         ],
     )
     set_preset.change(
