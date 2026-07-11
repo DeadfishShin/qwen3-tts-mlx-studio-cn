@@ -3,9 +3,9 @@ import types
 
 import gradio as gr
 
-from config import DEFAULT_SCRIPT_SILENCE_MS, DEFAULT_SPEAKERS, LANGUAGES, MAX_SCRIPT_SPEAKERS
+from config import DEFAULT_SCRIPT_SILENCE_MS, DEFAULT_SPEAKERS, LANGUAGE_AUTO, LANGUAGES, MAX_SCRIPT_SPEAKERS
 from audio_utils import concatenate_audio
-from generation import generate_with_timeout, save_audio
+from generation import api_language, generate_with_timeout, save_audio
 from script_parser import group_by_model_type, parse_script
 from ui.components import format_table_md, voice_choices
 
@@ -62,7 +62,8 @@ def build(ctx):
                             )
                             sm_speaker_modes.append(mode)
                             lang = gr.Dropdown(
-                                choices=LANGUAGES, value="English",
+                                choices=[LANGUAGE_AUTO] + LANGUAGES,
+                                value=LANGUAGE_AUTO,
                                 label="Language", scale=1,
                             )
                             sm_speaker_languages.append(lang)
@@ -153,6 +154,7 @@ def _generate_clone_lines_batched(ctx, lines, assignments_state, audio_by_line_n
 
     batch_size = ctx.settings.batch_size
     for (lib_voice, lang), group_lines in groups.items():
+        lang = api_language(lang)
         if not lib_voice or lib_voice == "None":
             for line in group_lines:
                 fail_line(line)
@@ -251,7 +253,7 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
                         lang = None
                         for line in batch_lines:
                             assignment = assignments_state.get(line.speaker, {})
-                            lang = assignment.get("language", "English")
+                            lang = api_language(assignment.get("language", "English"))
                             speakers.append(assignment.get("speaker", DEFAULT_SPEAKERS[0]))
                             instructs.append(assignment.get("instruct", ""))
 
@@ -266,7 +268,7 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
                         lang = None
                         for line in batch_lines:
                             assignment = assignments_state.get(line.speaker, {})
-                            lang = assignment.get("language", "English")
+                            lang = api_language(assignment.get("language", "English"))
                             instructs.append(assignment.get("instruct", ""))
 
                         results = generate_with_timeout(
@@ -286,7 +288,7 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
                     # Batch failed — retry each line individually
                     for line in batch_lines:
                         assignment = assignments_state.get(line.speaker, {})
-                        lang = assignment.get("language", "English")
+                        lang = api_language(assignment.get("language", "English"))
                         try:
                             if model_type == "custom_voice":
                                 sr, audio = generate_with_timeout(
@@ -319,7 +321,7 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
             for line in lines:
                 assignment = assignments_state.get(line.speaker, {})
                 mode = assignment.get("mode", "custom_voice")
-                lang = assignment.get("language", "English")
+                lang = api_language(assignment.get("language", "English"))
 
                 try:
                     if mode == "custom_voice":
@@ -430,7 +432,7 @@ def wire(ctx, ui):
             assignments[spk] = {
                 "mode": "custom_voice",
                 "speaker": DEFAULT_SPEAKERS[0],
-                "language": "English",
+                "language": LANGUAGE_AUTO,
                 "instruct": "",
                 "library_voice": "None",
             }
@@ -465,7 +467,7 @@ def wire(ctx, ui):
                 "mode": mode_map.get(mode_label, "custom_voice"),
                 "speaker": slot_values[base + 1] if base + 1 < len(slot_values) else DEFAULT_SPEAKERS[0],
                 "instruct": slot_values[base + 2] if base + 2 < len(slot_values) else "",
-                "language": slot_values[base + 3] if base + 3 < len(slot_values) else "English",
+                "language": slot_values[base + 3] if base + 3 < len(slot_values) else LANGUAGE_AUTO,
                 "library_voice": slot_values[base + 4] if base + 4 < len(slot_values) else "None",
             }
 

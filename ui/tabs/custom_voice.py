@@ -25,8 +25,8 @@ def build(ctx):
                         label=S.CV_SPEAKER,
                     )
                     cv_language = gr.Dropdown(
-                        choices=LANGUAGES,
-                        value="English",
+                        choices=[S.LANGUAGE_AUTO] + LANGUAGES,
+                        value=S.LANGUAGE_AUTO,
                         label=S.LANGUAGE,
                     )
                 cv_instruct = gr.Textbox(

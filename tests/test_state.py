@@ -8,7 +8,7 @@ def test_settings_defaults_match_config():
     assert s.top_k == config.DEFAULT_TOP_K
     assert s.max_tokens == config.DEFAULT_MAX_TOKENS
     assert s.output_dir == config.OUTPUT_DIR
-    assert s.default_language == "English"
+    assert s.default_language == config.LANGUAGE_AUTO
 
 
 def test_gen_kwargs_shape():

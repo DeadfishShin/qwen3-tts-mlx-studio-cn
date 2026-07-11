@@ -6,6 +6,7 @@ from config import (
     DEFAULT_EXPORT_FORMAT, DEFAULT_LOUDNORM, DEFAULT_MAX_TOKENS,
     DEFAULT_MP3_BITRATE, DEFAULT_REPETITION_PENALTY, DEFAULT_TEMPERATURE,
     DEFAULT_TIMEOUT, DEFAULT_TOP_K, DEFAULT_TOP_P, DEFAULT_TRIM_SILENCE,
+    LANGUAGE_AUTO,
     OUTPUT_DIR,
 )
 
@@ -27,7 +28,7 @@ class AppSettings:
     trim_silence: bool = DEFAULT_TRIM_SILENCE
     denoise_ref: bool = DEFAULT_DENOISE_REF
     batch_size: int = DEFAULT_BATCH_SIZE
-    default_language: str = "English"
+    default_language: str = LANGUAGE_AUTO
 
     def gen_kwargs(self) -> dict:
         """Sampler kwargs passed to every engine generate call."""

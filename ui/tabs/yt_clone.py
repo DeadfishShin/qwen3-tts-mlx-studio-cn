@@ -4,9 +4,9 @@ import types
 
 import gradio as gr
 
-from config import LANGUAGES
+from config import LANGUAGE_AUTO, LANGUAGES
 from generation import (
-    GenerationTimeout, generate_with_timeout, save_audio,
+    GenerationTimeout, api_language, generate_with_timeout, save_audio,
 )
 from ui.components import voice_choices, voice_table
 from ui.tabs.voice_clone import save_clone_to_library
@@ -42,6 +42,9 @@ def build(ctx):
                         label="End Time (mm:ss)", placeholder="blank = end of video", scale=1
                     )
                 yt_extract_btn = gr.Button("Extract Clip", variant="primary")
+                yt_trim_ref = gr.Checkbox(
+                    value=True, label="Trim silence from reference (recommended)"
+                )
 
                 gr.Markdown("**Step 3 — Review Transcript**", elem_classes=["yt-step"])
                 yt_transcript = gr.Textbox(
@@ -60,7 +63,8 @@ def build(ctx):
                 )
                 with gr.Row():
                     yt_language = gr.Dropdown(
-                        choices=LANGUAGES, value="English", label="Language", scale=1
+                        choices=[LANGUAGE_AUTO] + LANGUAGES,
+                        value=LANGUAGE_AUTO, label="Language", scale=1
                     )
                     yt_voice_name = gr.Textbox(
                         label="Voice Name (saved to library)",
@@ -93,6 +97,7 @@ def build(ctx):
     return types.SimpleNamespace(
         yt_video_state=yt_video_state, yt_url=yt_url, yt_fetch_btn=yt_fetch_btn,
         yt_start=yt_start, yt_end=yt_end, yt_extract_btn=yt_extract_btn,
+        yt_trim_ref=yt_trim_ref,
         yt_transcript=yt_transcript, yt_transcribe_btn=yt_transcribe_btn,
         yt_text=yt_text, yt_language=yt_language, yt_voice_name=yt_voice_name,
         yt_clone_btn=yt_clone_btn, yt_thumbnail=yt_thumbnail,
@@ -228,7 +233,7 @@ def transcribe_yt_clip(ctx, clip_audio):
         yield gr.update(), f"Error: {e}"
 
 
-def clone_yt_voice(ctx, text, ref_audio, transcript, language, voice_name):
+def clone_yt_voice(ctx, text, ref_audio, transcript, language, voice_name, trim_ref=True):
     errors = []
     if not text or not text.strip():
         errors.append("text to synthesize")
@@ -247,8 +252,9 @@ def clone_yt_voice(ctx, text, ref_audio, transcript, language, voice_name):
         t0 = time.time()
         result = generate_with_timeout(
             ctx.engine.generate_voice_clone,
-            text.strip(), ref_audio, transcript.strip(), language,
+            text.strip(), ref_audio, transcript.strip(), api_language(language),
             denoise_ref=ctx.settings.denoise_ref,
+            trim_ref=trim_ref,
             timeout_seconds=ctx.settings.timeout,
             **ctx.settings.gen_kwargs(),
         )
@@ -295,8 +301,9 @@ def wire(ctx, ui):
     def on_transcribe(clip_audio):
         yield from transcribe_yt_clip(ctx, clip_audio)
 
-    def on_clone(text, ref_audio, transcript, language, voice_name):
-        return clone_yt_voice(ctx, text, ref_audio, transcript, language, voice_name)
+    def on_clone(text, ref_audio, transcript, language, voice_name, trim_ref):
+        return clone_yt_voice(ctx, text, ref_audio, transcript, language, voice_name,
+                              trim_ref=trim_ref)
 
     t.yt_fetch_btn.click(
         fn=on_fetch,
@@ -318,7 +325,8 @@ def wire(ctx, ui):
     )
     t.yt_clone_btn.click(
         fn=on_clone,
-        inputs=[t.yt_text, t.yt_clip_audio, t.yt_transcript, t.yt_language, t.yt_voice_name],
+        inputs=[t.yt_text, t.yt_clip_audio, t.yt_transcript, t.yt_language, t.yt_voice_name,
+                t.yt_trim_ref],
         outputs=[t.yt_audio_out, ui.status, t.yt_status,
                  ui.vc.vc_library_voice, ui.lib.lib_table],
         show_progress="minimal",

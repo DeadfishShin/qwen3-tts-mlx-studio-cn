@@ -15,6 +15,9 @@ MODEL_VARIANTS = {
 # ASR model (fixed — do not change size/quant)
 ASR_REPO_ID = "mlx-community/Qwen3-ASR-1.7B-8bit"
 
+# UI value for automatic language detection (engine receives "auto")
+LANGUAGE_AUTO = "Auto-detect"
+
 # Supported languages
 LANGUAGES = [
     "English", "Chinese", "Japanese", "Korean",

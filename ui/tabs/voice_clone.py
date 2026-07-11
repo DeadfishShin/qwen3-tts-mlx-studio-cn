@@ -19,7 +19,8 @@ def build(ctx):
             with gr.Column(scale=2):
                 with gr.Row():
                     vc_language = gr.Dropdown(
-                        choices=LANGUAGES, value="English", label=S.LANGUAGE
+                        choices=[S.LANGUAGE_AUTO] + LANGUAGES,
+                        value=S.LANGUAGE_AUTO, label=S.LANGUAGE
                     )
                     vc_library_voice = gr.Dropdown(
                         choices=voice_choices(ctx),
@@ -32,6 +33,7 @@ def build(ctx):
                     sources=["upload", "microphone"],
                     buttons=["download"],
                 )
+                vc_trim_ref = gr.Checkbox(value=True, label=S.TRIM_REF_LABEL)
                 with gr.Row():
                     vc_transcribe_btn = gr.Button(S.VC_TRANSCRIBE, variant="secondary", scale=1)
                 gr.HTML(S.VC_TRANSCRIBE_HINT_HTML)
@@ -51,6 +53,7 @@ def build(ctx):
             out = build_output_column()
     return types.SimpleNamespace(
         vc_language=vc_language, vc_library_voice=vc_library_voice,
+        vc_trim_ref=vc_trim_ref,
         vc_ref_audio=vc_ref_audio, vc_transcribe_btn=vc_transcribe_btn,
         vc_ref_text=vc_ref_text, vc_text=vc_text, vc_generate=vc_generate,
         vc_lib_name=lib.lib_name, vc_lib_save=lib.lib_save, vc_lib_status=lib.lib_status,
@@ -102,16 +105,18 @@ def save_clone_to_library(ctx, ref_audio, ref_text, name, language):
 def wire(ctx, ui):
     t = ui.vc
 
-    def on_generate(text, ref_audio, ref_text, language, library_voice):
+    def on_generate(text, ref_audio, ref_text, language, library_voice, trim_ref):
         yield from run_single(ctx, GenRequest(
             mode="voice_clone", text=text, language=language,
-            ref_audio=ref_audio, ref_text=ref_text, library_voice=library_voice))
+            ref_audio=ref_audio, ref_text=ref_text, library_voice=library_voice,
+            trim_ref=trim_ref))
 
-    def on_batch(text, ref_audio, ref_text, language, library_voice,
+    def on_batch(text, ref_audio, ref_text, language, library_voice, trim_ref,
                  split_mode, silence_ms, progress=gr.Progress()):
         return run_batch(ctx, GenRequest(
             mode="voice_clone", text=text, language=language,
-            ref_audio=ref_audio, ref_text=ref_text, library_voice=library_voice),
+            ref_audio=ref_audio, ref_text=ref_text, library_voice=library_voice,
+            trim_ref=trim_ref),
             split_mode, silence_ms, progress)
 
     def save_and_refresh(ref_audio, ref_text, name, language):
@@ -132,7 +137,8 @@ def wire(ctx, ui):
     )
     t.vc_generate.click(
         fn=on_generate,
-        inputs=[t.vc_text, t.vc_ref_audio, t.vc_ref_text, t.vc_language, t.vc_library_voice],
+        inputs=[t.vc_text, t.vc_ref_audio, t.vc_ref_text, t.vc_language, t.vc_library_voice,
+                t.vc_trim_ref],
         outputs=[t.vc_audio, ui.status],
         show_progress="minimal",
     )
@@ -144,7 +150,7 @@ def wire(ctx, ui):
     t.vc_batch_generate.click(
         fn=on_batch,
         inputs=[t.vc_text, t.vc_ref_audio, t.vc_ref_text, t.vc_language, t.vc_library_voice,
-                t.vc_batch_split, t.vc_batch_silence],
+                t.vc_trim_ref, t.vc_batch_split, t.vc_batch_silence],
         outputs=[t.vc_batch_audio, t.vc_batch_table, t.vc_batch_status],
         show_progress="full",
     )
