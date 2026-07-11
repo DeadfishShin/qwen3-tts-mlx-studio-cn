@@ -8,4 +8,6 @@ soundfile>=0.13
 numpy>=2.0
 yt-dlp>=2024.1
 pysrt>=1.1
+# transformers is not imported directly — pinned to keep mlx-audio's tokenizer
+# stack on a known-good major version (mlx-audio 0.4.5 itself requires <5.13).
 transformers>=5.5.0,<6

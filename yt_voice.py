@@ -64,7 +64,6 @@ class YTVoiceExtractor:
             "uploader": info.get("uploader", ""),
             "has_manual_subs": has_manual,
             "has_auto_subs": has_auto,
-            "has_subs": has_manual or has_auto,
             "language": info.get("language"),
         }
 

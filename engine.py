@@ -31,6 +31,17 @@ class TTSEngine:
                 "Engine is busy with a previous generation. Please wait and try again."
             )
 
+    def _release_lock(self):
+        """Return cached GPU buffers to the OS, then release the lock.
+
+        MLX's buffer cache can grow to several GB after a long generation and
+        is never returned while idle — enough to push a 16 GB machine into
+        swap. Clearing per-generation trades a little re-allocation time for
+        a low idle footprint.
+        """
+        mx.clear_cache()
+        self._lock.release()
+
     def get_repo_id(self, model_type: str) -> str:
         """Build HuggingFace repo ID from model_type + size + quant."""
         variant = MODEL_VARIANTS[model_type]
@@ -71,7 +82,7 @@ class TTSEngine:
         try:
             self._unload_model_unlocked()
         finally:
-            self._lock.release()
+            self._release_lock()
 
     def _unload_model_unlocked(self):
         """Free memory from current model (and ASR if loaded). Caller must hold lock."""
@@ -81,6 +92,7 @@ class TTSEngine:
             self.current_model = None
             self.current_model_type = None
             gc.collect()
+            mx.clear_cache()
 
     def generate_custom_voice(self, text, speaker, language, instruct="", **kwargs) -> tuple:
         """Returns (sample_rate, numpy_audio_array)."""
@@ -95,7 +107,7 @@ class TTSEngine:
             )
             return self._to_numpy(results[0])
         finally:
-            self._lock.release()
+            self._release_lock()
 
     def generate_voice_design(self, text, language, instruct, **kwargs) -> tuple:
         """Returns (sample_rate, numpy_audio_array)."""
@@ -110,7 +122,7 @@ class TTSEngine:
             )
             return self._to_numpy(results[0])
         finally:
-            self._lock.release()
+            self._release_lock()
 
     def generate_voice_clone(self, text, ref_audio_path, ref_text, language="English",
                              denoise_ref=False, **kwargs) -> tuple:
@@ -134,19 +146,23 @@ class TTSEngine:
         finally:
             if tmp_denoised and os.path.isfile(tmp_denoised):
                 os.remove(tmp_denoised)
-            self._lock.release()
+            self._release_lock()
 
     def batch_generate_custom_voice(self, texts, speaker, language, instruct="", **kwargs):
         """Generate audio for multiple texts in one batched forward pass.
 
-        Returns list of (sample_rate, numpy_audio_array) in input order.
+        speaker and instruct may each be a single value (applied to every text)
+        or a per-text list. Returns list of (sample_rate, numpy_audio_array)
+        in input order.
         """
         self._acquire_lock()
         try:
             self._load_model("custom_voice")
             batch_size = len(texts)
-            speakers = [speaker] * batch_size
-            instructs = [instruct] * batch_size
+            speakers = (list(speaker) if isinstance(speaker, (list, tuple))
+                        else [speaker] * batch_size)
+            instructs = (list(instruct) if isinstance(instruct, (list, tuple))
+                         else [instruct] * batch_size)
             results = list(
                 self.current_model.batch_generate(
                     texts=texts,
@@ -160,18 +176,20 @@ class TTSEngine:
             results.sort(key=lambda r: r.sequence_idx)
             return [self._to_numpy(r) for r in results]
         finally:
-            self._lock.release()
+            self._release_lock()
 
     def batch_generate_voice_design(self, texts, language, instruct, **kwargs):
         """Generate audio for multiple texts in one batched forward pass.
 
-        Returns list of (sample_rate, numpy_audio_array) in input order.
+        instruct may be a single value (applied to every text) or a per-text
+        list. Returns list of (sample_rate, numpy_audio_array) in input order.
         """
         self._acquire_lock()
         try:
             self._load_model("voice_design")
             batch_size = len(texts)
-            instructs = [instruct] * batch_size
+            instructs = (list(instruct) if isinstance(instruct, (list, tuple))
+                         else [instruct] * batch_size)
             results = list(
                 self.current_model.batch_generate(
                     texts=texts,
@@ -183,7 +201,7 @@ class TTSEngine:
             results.sort(key=lambda r: r.sequence_idx)
             return [self._to_numpy(r) for r in results]
         finally:
-            self._lock.release()
+            self._release_lock()
 
     # ----- ASR -----
 
@@ -208,10 +226,7 @@ class TTSEngine:
         try:
             self._unload_asr_unlocked()
         finally:
-            self._lock.release()
-
-    def is_asr_loaded(self) -> bool:
-        return self.asr_model is not None
+            self._release_lock()
 
     def transcribe(self, audio_path, language="auto") -> str:
         """Transcribe audio file, returns text. Loads/unloads ASR automatically."""
@@ -222,7 +237,7 @@ class TTSEngine:
             return result.text
         finally:
             self._unload_asr_unlocked()
-            self._lock.release()
+            self._release_lock()
 
     def _to_numpy(self, result) -> tuple:
         """Convert mlx array result to numpy for Gradio Audio component."""

@@ -1,3 +1,5 @@
+from string import Template
+
 import gradio as gr
 
 COLORS = {
@@ -13,68 +15,72 @@ COLORS = {
     "accent_magenta": "#bb9af7",
     "accent_orange": "#ff9e64",
     "accent_red": "#f7768e",
+    "accent_yellow": "#e0af68",
+    "accent_teal": "#73daca",
+    "bg_dark": "#16161e",
     "border": "#3b4261",
 }
 
-custom_css = """
+# custom_css is built from COLORS so the palette has one source of truth.
+_CSS_TEMPLATE = Template("""
 /* Global background */
-.gradio-container { background-color: #1a1b26 !important; color: #c0caf5 !important; }
+.gradio-container { background-color: $bg_primary !important; color: $fg_primary !important; }
 
 /* Tab styling */
-.tab-nav button { color: #a9b1d6 !important; font-size: 0.88em; padding: 8px 14px !important; }
-.tab-nav button.selected { color: #7aa2f7 !important; border-bottom-color: #7aa2f7 !important; }
+.tab-nav button { color: $fg_secondary !important; font-size: 0.88em; padding: 8px 14px !important; }
+.tab-nav button.selected { color: $accent_blue !important; border-bottom-color: $accent_blue !important; }
 
 /* Primary button */
-.primary { background-color: #7aa2f7 !important; color: #1a1b26 !important; font-weight: 600 !important; }
+.primary { background-color: $accent_blue !important; color: $bg_primary !important; font-weight: 600 !important; }
 
 /* Audio player */
-.audio-player { background-color: #24283b !important; }
+.audio-player { background-color: $bg_secondary !important; }
 
 /* Text inputs */
-textarea, input[type="text"] { background-color: #24283b !important; color: #c0caf5 !important; border-color: #3b4261 !important; }
+textarea, input[type="text"] { background-color: $bg_secondary !important; color: $fg_primary !important; border-color: $border !important; }
 
 /* Global status bar at very bottom */
-.status-bar { background-color: #16161e !important; border-top: 1px solid #3b4261 !important; }
-.status-bar textarea { background: transparent !important; border: none !important; padding: 8px 14px !important; min-height: 58px !important; max-height: 58px !important; resize: none !important; overflow-y: auto !important; color: #a9b1d6 !important; font-size: 0.84em !important; line-height: 1.5 !important; }
+.status-bar { background-color: $bg_dark !important; border-top: 1px solid $border !important; }
+.status-bar textarea { background: transparent !important; border: none !important; padding: 8px 14px !important; min-height: 58px !important; max-height: 58px !important; resize: none !important; overflow-y: auto !important; color: $fg_secondary !important; font-size: 0.84em !important; line-height: 1.5 !important; }
 
 /* Header */
 .app-header { text-align: center; padding: 12px 16px 8px; }
-.app-header h1 { color: #7aa2f7; font-size: 1.4em; margin: 0 0 2px; }
-.app-header .subtitle { color: #565f89; font-size: 0.85em; margin: 0; }
+.app-header h1 { color: $accent_blue; font-size: 1.4em; margin: 0 0 2px; }
+.app-header .subtitle { color: $fg_muted; font-size: 0.85em; margin: 0; }
 
 /* Batch mode accordion */
-.batch-accordion { border: 1px solid #3b4261 !important; border-radius: 8px; margin-top: 10px; }
-.batch-accordion > .label-wrap { padding: 6px 12px !important; font-size: 0.88em !important; color: #565f89 !important; }
+.batch-accordion { border: 1px solid $border !important; border-radius: 8px; margin-top: 10px; }
+.batch-accordion > .label-wrap { padding: 6px 12px !important; font-size: 0.88em !important; color: $fg_muted !important; }
 
 /* Script editor */
 .script-editor textarea { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace !important; font-size: 0.88em; line-height: 1.6; }
 
 /* Speaker assignment slots — color-coded borders */
-.speaker-slot-0 { border-left: 3px solid #7aa2f7 !important; padding-left: 8px; }
-.speaker-slot-1 { border-left: 3px solid #bb9af7 !important; padding-left: 8px; }
-.speaker-slot-2 { border-left: 3px solid #9ece6a !important; padding-left: 8px; }
-.speaker-slot-3 { border-left: 3px solid #ff9e64 !important; padding-left: 8px; }
-.speaker-slot-4 { border-left: 3px solid #7dcfff !important; padding-left: 8px; }
-.speaker-slot-5 { border-left: 3px solid #f7768e !important; padding-left: 8px; }
-.speaker-slot-6 { border-left: 3px solid #e0af68 !important; padding-left: 8px; }
-.speaker-slot-7 { border-left: 3px solid #73daca !important; padding-left: 8px; }
+.speaker-slot-0 { border-left: 3px solid $accent_blue !important; padding-left: 8px; }
+.speaker-slot-1 { border-left: 3px solid $accent_magenta !important; padding-left: 8px; }
+.speaker-slot-2 { border-left: 3px solid $accent_green !important; padding-left: 8px; }
+.speaker-slot-3 { border-left: 3px solid $accent_orange !important; padding-left: 8px; }
+.speaker-slot-4 { border-left: 3px solid $accent_cyan !important; padding-left: 8px; }
+.speaker-slot-5 { border-left: 3px solid $accent_red !important; padding-left: 8px; }
+.speaker-slot-6 { border-left: 3px solid $accent_yellow !important; padding-left: 8px; }
+.speaker-slot-7 { border-left: 3px solid $accent_teal !important; padding-left: 8px; }
 
 /* History table */
 .history-table { font-size: 0.85em; }
 
 /* Progress indicators */
-.batch-progress { color: #9ece6a; font-weight: bold; }
+.batch-progress { color: $accent_green; font-weight: bold; }
 
 /* YT Voice Clone step headers */
 .yt-step p {
-    color: #7aa2f7 !important;
+    color: $accent_blue !important;
     font-weight: 700 !important;
     font-size: 0.82em !important;
     text-transform: uppercase !important;
     letter-spacing: 0.06em !important;
     margin: 10px 0 4px !important;
     padding: 4px 10px !important;
-    border-left: 3px solid #7aa2f7 !important;
+    border-left: 3px solid $accent_blue !important;
     background: rgba(122, 162, 247, 0.07) !important;
     border-radius: 0 4px 4px 0 !important;
 }
@@ -83,11 +89,11 @@ textarea, input[type="text"] { background-color: #24283b !important; color: #c0c
 .info-notice {
     background: rgba(122, 162, 247, 0.07) !important;
     border: 1px solid rgba(122, 162, 247, 0.25) !important;
-    border-left: 3px solid #7aa2f7 !important;
+    border-left: 3px solid $accent_blue !important;
     border-radius: 0 6px 6px 0 !important;
     padding: 8px 14px !important;
     font-size: 0.84em !important;
-    color: #a9b1d6 !important;
+    color: $fg_secondary !important;
     margin-bottom: 6px !important;
     line-height: 1.5 !important;
 }
@@ -98,7 +104,7 @@ textarea, input[type="text"] { background-color: #24283b !important; color: #c0c
     font-size: 0.8em !important;
     min-height: 32px !important;
     padding: 5px 8px !important;
-    color: #565f89 !important;
+    color: $fg_muted !important;
     resize: none !important;
 }
 .save-status-text .label-wrap { display: none !important; }
@@ -108,35 +114,37 @@ textarea, input[type="text"] { background-color: #24283b !important; color: #c0c
     font-size: 0.82em !important;
     min-height: 32px !important;
     padding: 5px 8px !important;
-    color: #a9b1d6 !important;
+    color: $fg_secondary !important;
     resize: none !important;
 }
 
 /* Output column left border separator */
-.output-col { border-left: 1px solid #3b4261; padding-left: 4px !important; }
+.output-col { border-left: 1px solid $border; padding-left: 4px !important; }
 
 /* Library save section accordion */
-.lib-save-accordion { border: 1px dashed #3b4261 !important; border-radius: 6px !important; margin-top: 6px !important; }
-.lib-save-accordion > .label-wrap { font-size: 0.88em !important; color: #565f89 !important; padding: 5px 10px !important; }
+.lib-save-accordion { border: 1px dashed $border !important; border-radius: 6px !important; margin-top: 6px !important; }
+.lib-save-accordion > .label-wrap { font-size: 0.88em !important; color: $fg_muted !important; padding: 5px 10px !important; }
 
 /* Settings tab collapsible sections */
-.settings-accordion { border: 1px solid #3b4261 !important; border-radius: 8px; margin-top: 10px; }
-.settings-accordion > .label-wrap { padding: 6px 12px !important; font-size: 0.88em !important; color: #565f89 !important; }
+.settings-accordion { border: 1px solid $border !important; border-radius: 8px; margin-top: 10px; }
+.settings-accordion > .label-wrap { padding: 6px 12px !important; font-size: 0.88em !important; color: $fg_muted !important; }
 
 /* Settings panel groups */
 .settings-group {
     background: rgba(36, 40, 59, 0.5) !important;
-    border: 1px solid #3b4261 !important;
+    border: 1px solid $border !important;
     border-radius: 8px !important;
     padding: 12px !important;
 }
 
 /* Section markdown headings inside tabs */
-.tab-content h3 { font-size: 0.9em !important; color: #7aa2f7 !important; margin: 8px 0 4px !important; font-weight: 600 !important; }
+.tab-content h3 { font-size: 0.9em !important; color: $accent_blue !important; margin: 8px 0 4px !important; font-weight: 600 !important; }
 
 /* Text length hint below text boxes */
-.text-hint p { color: #565f89 !important; font-size: 0.8em !important; margin: 2px 0 4px !important; }
-"""
+.text-hint p { color: $fg_muted !important; font-size: 0.8em !important; margin: 2px 0 4px !important; }
+""")
+custom_css = _CSS_TEMPLATE.substitute(**COLORS)
+
 
 
 def build_theme():

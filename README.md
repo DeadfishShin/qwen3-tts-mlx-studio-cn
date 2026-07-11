@@ -129,8 +129,14 @@ English, Chinese, Japanese, Korean, German, French, Russian, Portuguese, Spanish
 ## Project Layout
 
 ```
-app.py            — Gradio UI, tabs, and event wiring
+app.py            — Entrypoint: CLI args, startup checks, UI assembly
+generation.py     — Shared generation pipeline (validation, timeout, history, autosave)
 engine.py         — Model load/unload/inference (thread-safe, TTS + ASR)
+state.py          — Runtime settings (AppSettings) and app context
+ui/
+  strings.py      — All user-facing text
+  components.py   — Shared UI builders and table formatters
+  tabs/           — One module per tab (layout + event wiring)
 voice_library.py  — Voice profile storage
 yt_voice.py       — YouTube clip extraction and subtitle alignment
 audio_utils.py    — Audio concatenation, text splitting, and format export
@@ -138,6 +144,7 @@ script_parser.py  — Multi-speaker script parser
 history.py        — Generation history log
 config.py         — Constants and defaults
 theme.py          — Dark theme and custom CSS
+scripts/          — Smoke test and launch check
 install.sh        — One-step installer
 uninstall.sh      — Remove venv, caches, and downloaded models
 run.sh            — App launcher
