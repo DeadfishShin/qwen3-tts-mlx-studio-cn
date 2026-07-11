@@ -104,6 +104,14 @@ check("single voice_clone (ICL)", single_clone)
 if not args.fast:
     check("asr transcribe", asr)
 
+def cache_returned():
+    import mlx.core as mx
+    cache_mb = mx.get_cache_memory() / 1e6
+    assert cache_mb < 50, f"MLX buffer cache not returned after generation: {cache_mb:.0f} MB"
+
+
+check("mlx cache returned", cache_returned)
+
 engine.unload_model()
 if failures:
     print(f"\nSMOKE TEST FAILED: {failures}")
