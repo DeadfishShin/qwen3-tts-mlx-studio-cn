@@ -216,9 +216,6 @@ class TTSEngine:
         finally:
             self._lock.release()
 
-    def is_asr_loaded(self) -> bool:
-        return self.asr_model is not None
-
     def transcribe(self, audio_path, language="auto") -> str:
         """Transcribe audio file, returns text. Loads/unloads ASR automatically."""
         self._acquire_lock()

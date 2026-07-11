@@ -103,10 +103,6 @@ class GenerationHistory:
         self._save_index()
         return entry
 
-    def list_entries(self) -> list[HistoryEntry]:
-        """Return all entries, newest first."""
-        return list(self._entries)
-
     def get_audio(self, entry_id: str) -> tuple[int, np.ndarray] | None:
         """Get audio for an entry, from cache or disk."""
         if entry_id in self._audio_cache:
