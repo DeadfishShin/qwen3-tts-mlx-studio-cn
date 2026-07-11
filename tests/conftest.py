@@ -45,12 +45,21 @@ class FakeEngine:
         return self._audio()
 
     def generate_voice_clone(self, text, ref_audio_path, ref_text, language="English",
-                             denoise_ref=False, **kw):
+                             denoise_ref=False, trim_ref=False, **kw):
         self.calls.append(("generate_voice_clone", text))
         if "voice_clone" in self.fail_modes:
             raise RuntimeError("fake single failure")
         self.current_model_type = "base"
         return self._audio()
+
+    def batch_generate_voice_clone(self, texts, ref_audio_path, ref_text,
+                                   language="English", denoise_ref=False,
+                                   trim_ref=False, **kw):
+        self.calls.append(("batch_generate_voice_clone", tuple(texts)))
+        if self.fail_batch:
+            raise RuntimeError("fake batch failure")
+        self.current_model_type = "base"
+        return [self._audio() for _ in texts]
 
     def batch_generate_custom_voice(self, texts, speaker, language, instruct="", **kw):
         self.calls.append(("batch_generate_custom_voice", tuple(texts)))
