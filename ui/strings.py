@@ -41,6 +41,20 @@ VOICE_NAME = "Voice Name"
 SAVE_VOICE_TO_LIBRARY = "Save Voice to Library"
 LIB_STATUS_PLACEHOLDER = "Library status…"
 
+# --- Custom Voice tab ---
+TAB_CUSTOM_VOICE = "Custom Voice"
+CV_TEXT_LABEL = "Text"
+CV_SPEAKER = "Speaker"
+CV_INSTRUCT = "Style Instruction (optional)"
+CV_INSTRUCT_PLACEHOLDER = "e.g. Speak warmly, Sound excited..."
+
+# --- Voice Design tab ---
+TAB_VOICE_DESIGN = "Voice Design"
+VD_TEXT_LABEL = "Text"
+VD_INSTRUCT = "Voice Description"
+VD_INSTRUCT_PLACEHOLDER = "e.g. A deep, calm male narrator with a British accent"
+VD_LIB_NAME_PLACEHOLDER = "my_narrator"
+
 # --- Table empty states ---
 NO_VOICES = "*No voices saved.*"
 NO_HISTORY = "*No history entries.*"

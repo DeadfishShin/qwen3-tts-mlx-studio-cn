@@ -13,6 +13,7 @@ import concurrent.futures
 import shutil
 import sys
 import time
+import types
 from datetime import datetime
 
 import gradio as gr
@@ -56,7 +57,10 @@ from config import (
 from engine import TTSEngine
 from history import GenerationHistory
 from script_parser import parse_script, group_by_model_type
+from state import AppContext, AppSettings
 from theme import build_theme, custom_css
+from ui.tabs import custom_voice as cv_tab
+from ui.tabs import voice_design as vd_tab
 from voice_library import VoiceLibrary
 from yt_voice import get_yt_extractor
 
@@ -115,6 +119,11 @@ engine.quantization = args.quant
 library = VoiceLibrary()
 history = GenerationHistory()
 yt_extractor = get_yt_extractor()
+
+ctx = AppContext(
+    engine=engine, library=library, history=history, yt=yt_extractor,
+    settings=AppSettings(), startup_warnings=startup_warnings,
+)
 
 # ---------------------------------------------------------------------------
 # Runtime settings (mutated by Settings tab)
@@ -233,95 +242,6 @@ def _voice_table():
 # ---------------------------------------------------------------------------
 # Generation handlers
 # ---------------------------------------------------------------------------
-def generate_custom_voice(text, speaker, language, instruct):
-    if not text.strip():
-        gr.Warning("Please enter text to speak.")
-        yield None, "Enter text first"
-        return
-    if not engine.is_model_loaded("custom_voice"):
-        repo_id = engine.get_repo_id("custom_voice")
-        if _is_model_cached(repo_id):
-            yield None, f"Loading model into memory… ({repo_id})"
-        else:
-            yield None, (
-                f"Downloading model on first run (~6 GB) — this may take several minutes… ({repo_id})"
-            )
-    try:
-        start = time.time()
-        sr, audio = generate_with_timeout(
-            engine.generate_custom_voice, text, speaker, language, instruct,
-            timeout_seconds=app_settings["timeout"],
-            **_gen_kwargs(),
-        )
-        elapsed = time.time() - start
-        result = (sr, audio)
-        # Record to history
-        history.add(
-            mode="custom_voice", text=text, language=language,
-            audio=result, speaker=speaker,
-            voice_params=instruct if instruct else "",
-        )
-        save_msg = ""
-        if app_settings["autosave"]:
-            save_msg = " | " + save_audio(result, "custom")
-        yield (
-            gr.update(value=result),
-            f"Generated in {elapsed:.1f}s | Model: {engine.get_repo_id('custom_voice')}{save_msg}",
-        )
-    except GenerationTimeout as e:
-        gr.Warning(str(e))
-        yield None, str(e)
-    except Exception as e:
-        gr.Warning(f"Generation failed: {e}")
-        yield None, f"Error: {e}"
-
-
-def generate_voice_design(text, language, instruct):
-    if not text.strip():
-        gr.Warning("Please enter text to speak.")
-        yield None, "Enter text first"
-        return
-    if not instruct.strip():
-        gr.Warning("Please describe the voice you want.")
-        yield None, "Describe the voice first"
-        return
-    if not engine.is_model_loaded("voice_design"):
-        repo_id = engine.get_repo_id("voice_design")
-        if _is_model_cached(repo_id):
-            yield None, f"Loading model into memory… ({repo_id})"
-        else:
-            yield None, (
-                f"Downloading model on first run (~6 GB) — this may take several minutes… ({repo_id})"
-            )
-    try:
-        start = time.time()
-        sr, audio = generate_with_timeout(
-            engine.generate_voice_design, text, language, instruct,
-            timeout_seconds=app_settings["timeout"],
-            **_gen_kwargs(),
-        )
-        elapsed = time.time() - start
-        result = (sr, audio)
-        # Record to history
-        history.add(
-            mode="voice_design", text=text, language=language,
-            audio=result, voice_params=instruct,
-        )
-        save_msg = ""
-        if app_settings["autosave"]:
-            save_msg = " | " + save_audio(result, "design")
-        yield (
-            gr.update(value=result),
-            f"Generated in {elapsed:.1f}s | Model: {engine.get_repo_id('voice_design')}{save_msg}",
-        )
-    except GenerationTimeout as e:
-        gr.Warning(str(e))
-        yield None, str(e)
-    except Exception as e:
-        gr.Warning(f"Generation failed: {e}")
-        yield None, f"Error: {e}"
-
-
 def generate_voice_clone(text, ref_audio, ref_text, language, library_voice):
     if not text.strip():
         gr.Warning("Please enter text to speak.")
@@ -457,148 +377,6 @@ def save_transcript(text):
 # ---------------------------------------------------------------------------
 # Batch generation handlers
 # ---------------------------------------------------------------------------
-def _run_batch_custom_voice(text, speaker, language, instruct, split_mode, silence_ms, progress=gr.Progress()):
-    segments = split_text(text, split_mode)
-    if not segments:
-        gr.Warning("No text segments found.")
-        return None, [["(empty)", "", ""]], "No segments"
-    if len(segments) > MAX_BATCH_SEGMENTS:
-        gr.Warning(f"Too many segments ({len(segments)}). Max is {MAX_BATCH_SEGMENTS}.")
-        return None, [["(error)", "", ""]], f"Too many segments (max {MAX_BATCH_SEGMENTS})"
-
-    batch_size = app_settings["batch_size"]
-    audio_parts = []
-    table_rows = []
-    succeeded, failed = 0, 0
-    total = len(segments)
-
-    for batch_start in range(0, total, batch_size):
-        batch_segs = segments[batch_start:batch_start + batch_size]
-        batch_indices = list(range(batch_start, batch_start + len(batch_segs)))
-
-        try:
-            results = generate_with_timeout(
-                engine.batch_generate_custom_voice,
-                batch_segs, speaker, language, instruct,
-                timeout_seconds=app_settings["timeout"],
-                **_gen_kwargs(),
-            )
-            for j, (sr, audio) in enumerate(results):
-                idx = batch_indices[j]
-                seg = batch_segs[j]
-                preview = seg[:50] + "..." if len(seg) > 50 else seg
-                duration = len(audio) / sr
-                audio_parts.append((sr, audio))
-                table_rows.append([str(idx + 1), preview, f"{duration:.1f}s"])
-                succeeded += 1
-                progress((batch_start + j + 1) / total, desc="Generating segments")
-        except Exception:
-            # Batch failed — retry each segment individually
-            for j, seg in enumerate(batch_segs):
-                idx = batch_indices[j]
-                preview = seg[:50] + "..." if len(seg) > 50 else seg
-                try:
-                    sr, audio = generate_with_timeout(
-                        engine.generate_custom_voice, seg, speaker, language, instruct,
-                        timeout_seconds=app_settings["timeout"],
-                        **_gen_kwargs(),
-                    )
-                    duration = len(audio) / sr
-                    audio_parts.append((sr, audio))
-                    table_rows.append([str(idx + 1), preview, f"{duration:.1f}s"])
-                    succeeded += 1
-                except Exception as e:
-                    table_rows.append([str(idx + 1), preview, f"Failed: {e}"])
-                    failed += 1
-                progress((batch_start + j + 1) / total, desc="Generating segments")
-
-    if not audio_parts:
-        return None, table_rows, "All segments failed"
-
-    combined = concatenate_audio(audio_parts, silence_ms=int(silence_ms))
-    history.add(
-        mode="custom_voice", text=f"[Batch: {succeeded} segments]",
-        language=language, audio=combined, speaker=speaker,
-        voice_params=f"batch ({split_mode})",
-    )
-    status_msg = f"Generated {succeeded}/{total} segments"
-    if failed:
-        status_msg += f" ({failed} failed)"
-    return gr.update(value=combined), table_rows, status_msg
-
-
-def _run_batch_voice_design(text, language, instruct, split_mode, silence_ms, progress=gr.Progress()):
-    if not instruct.strip():
-        gr.Warning("Please describe the voice.")
-        return None, [["(empty)", "", ""]], "Describe voice first"
-    segments = split_text(text, split_mode)
-    if not segments:
-        gr.Warning("No text segments found.")
-        return None, [["(empty)", "", ""]], "No segments"
-    if len(segments) > MAX_BATCH_SEGMENTS:
-        gr.Warning(f"Too many segments ({len(segments)}). Max is {MAX_BATCH_SEGMENTS}.")
-        return None, [["(error)", "", ""]], f"Too many segments (max {MAX_BATCH_SEGMENTS})"
-
-    batch_size = app_settings["batch_size"]
-    audio_parts = []
-    table_rows = []
-    succeeded, failed = 0, 0
-    total = len(segments)
-
-    for batch_start in range(0, total, batch_size):
-        batch_segs = segments[batch_start:batch_start + batch_size]
-        batch_indices = list(range(batch_start, batch_start + len(batch_segs)))
-
-        try:
-            results = generate_with_timeout(
-                engine.batch_generate_voice_design,
-                batch_segs, language, instruct,
-                timeout_seconds=app_settings["timeout"],
-                **_gen_kwargs(),
-            )
-            for j, (sr, audio) in enumerate(results):
-                idx = batch_indices[j]
-                seg = batch_segs[j]
-                preview = seg[:50] + "..." if len(seg) > 50 else seg
-                duration = len(audio) / sr
-                audio_parts.append((sr, audio))
-                table_rows.append([str(idx + 1), preview, f"{duration:.1f}s"])
-                succeeded += 1
-                progress((batch_start + j + 1) / total, desc="Generating segments")
-        except Exception:
-            # Batch failed — retry each segment individually
-            for j, seg in enumerate(batch_segs):
-                idx = batch_indices[j]
-                preview = seg[:50] + "..." if len(seg) > 50 else seg
-                try:
-                    sr, audio = generate_with_timeout(
-                        engine.generate_voice_design, seg, language, instruct,
-                        timeout_seconds=app_settings["timeout"],
-                        **_gen_kwargs(),
-                    )
-                    duration = len(audio) / sr
-                    audio_parts.append((sr, audio))
-                    table_rows.append([str(idx + 1), preview, f"{duration:.1f}s"])
-                    succeeded += 1
-                except Exception as e:
-                    table_rows.append([str(idx + 1), preview, f"Failed: {e}"])
-                    failed += 1
-                progress((batch_start + j + 1) / total, desc="Generating segments")
-
-    if not audio_parts:
-        return None, table_rows, "All segments failed"
-
-    combined = concatenate_audio(audio_parts, silence_ms=int(silence_ms))
-    history.add(
-        mode="voice_design", text=f"[Batch: {succeeded} segments]",
-        language=language, audio=combined, voice_params=f"batch ({split_mode})",
-    )
-    status_msg = f"Generated {succeeded}/{total} segments"
-    if failed:
-        status_msg += f" ({failed} failed)"
-    return gr.update(value=combined), table_rows, status_msg
-
-
 def _run_batch_voice_clone(text, ref_audio, ref_text, language, library_voice, split_mode, silence_ms, progress=gr.Progress()):
     # Resolve library voice
     if library_voice and library_voice != "None":
@@ -1029,29 +807,6 @@ def history_regenerate(entry_id):
 # ---------------------------------------------------------------------------
 # Save-to-library handlers
 # ---------------------------------------------------------------------------
-def save_design_to_library(audio_tuple, name, language, description, spoken_text):
-    if audio_tuple is None:
-        gr.Warning("Generate audio first before saving to library.")
-        return "No audio to save"
-    if not name.strip():
-        gr.Warning("Please enter a name for this voice.")
-        return "Enter a voice name"
-    sr, audio = audio_tuple
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    tmp_path = os.path.join(OUTPUT_DIR, f"_tmp_design_{int(time.time())}.wav")
-    sf.write(tmp_path, audio, sr)
-    library.save_voice(
-        name=name,
-        ref_audio_path=tmp_path,
-        ref_text=spoken_text,
-        language=language,
-        description=description,
-        source="design",
-    )
-    os.remove(tmp_path)
-    return f"Voice '{name}' saved to library"
-
-
 def save_clone_to_library(ref_audio, ref_text, name, language):
     if not ref_audio:
         gr.Warning("No reference audio to save.")
@@ -1339,6 +1094,10 @@ def apply_settings(
     app_settings["batch_size"] = int(batch_size)
     app_settings["default_language"] = default_language
 
+    # Transitional bridge: keep ctx.settings in sync until every tab reads it directly.
+    for k, v in app_settings.items():
+        setattr(ctx.settings, k, v)
+
     os.makedirs(app_settings["output_dir"], exist_ok=True)
 
     parts = [f"size: {model_size}, quant: {quantization}"]
@@ -1439,136 +1198,9 @@ with gr.Blocks(title="Qwen3-TTS MLX Studio") as app:
     )
 
     with gr.Tabs():
-        # =================================================================
-        # Tab 1: Custom Voice
-        # =================================================================
-        with gr.Tab("Custom Voice"):
-            with gr.Row():
-                with gr.Column(scale=2):
-                    cv_text = gr.Textbox(
-                        label="Text",
-                        lines=5,
-                        placeholder="Enter text to speak...",
-                    )
-                    with gr.Row():
-                        cv_speaker = gr.Dropdown(
-                            choices=DEFAULT_SPEAKERS,
-                            value=DEFAULT_SPEAKERS[0],
-                            label="Speaker",
-                        )
-                        cv_language = gr.Dropdown(
-                            choices=LANGUAGES,
-                            value="English",
-                            label="Language",
-                        )
-                    cv_instruct = gr.Textbox(
-                        label="Style Instruction (optional)",
-                        lines=1,
-                        placeholder="e.g. Speak warmly, Sound excited...",
-                    )
-                    gr.Markdown(
-                        "_Tip: 1–4 sentences work best. Very long text may hit the 120 s timeout._",
-                        elem_classes=["text-hint"],
-                    )
-                    cv_generate = gr.Button("Generate", variant="primary")
-                    # Batch Mode Accordion
-                    with gr.Accordion("Batch Mode", open=False, elem_classes=["batch-accordion"]):
-                        with gr.Row():
-                            cv_batch_split = gr.Radio(
-                                ["paragraph", "sentence", "line"],
-                                value=DEFAULT_BATCH_SPLIT_MODE,
-                                label="Split Mode",
-                            )
-                            cv_batch_silence = gr.Slider(
-                                0, 2000, value=DEFAULT_SILENCE_GAP_MS, step=50,
-                                label="Silence Gap (ms)",
-                            )
-                        cv_batch_generate = gr.Button("Generate Batch", variant="primary")
-                        cv_batch_table = gr.Dataframe(
-                            headers=["#", "Text", "Status"],
-                            value=[["", "", ""]],
-                            label="Batch Results",
-                            interactive=False,
-                        )
-                        cv_batch_audio = gr.Audio(label="Combined Output", type="numpy", interactive=False, buttons=["download"])
-                        with gr.Row():
-                            cv_batch_save = gr.Button("Save Combined Audio")
-                            cv_batch_status = gr.Textbox(label="Batch Status", interactive=False)
-                with gr.Column(scale=1, elem_classes=["output-col"]):
-                    cv_audio = gr.Audio(label="Output", type="numpy", interactive=False, buttons=["download"])
-                    cv_save = gr.Button("Save Audio")
-                    cv_save_status = gr.Textbox(
-                        show_label=False, interactive=False,
-                        placeholder="Save path appears here…",
-                        elem_classes=["save-status-text"],
-                    )
-
-        # =================================================================
-        # Tab 2: Voice Design
-        # =================================================================
-        with gr.Tab("Voice Design"):
-            with gr.Row():
-                with gr.Column(scale=2):
-                    vd_text = gr.Textbox(
-                        label="Text",
-                        lines=5,
-                        placeholder="Enter text to speak...",
-                    )
-                    vd_instruct = gr.Textbox(
-                        label="Voice Description",
-                        lines=2,
-                        placeholder="e.g. A deep, calm male narrator with a British accent",
-                    )
-                    vd_language = gr.Dropdown(
-                        choices=LANGUAGES, value="English", label="Language"
-                    )
-                    gr.Markdown(
-                        "_Tip: 1–4 sentences work best. Very long text may hit the 120 s timeout._",
-                        elem_classes=["text-hint"],
-                    )
-                    vd_generate = gr.Button("Generate", variant="primary")
-                    with gr.Accordion("Save to Voice Library", open=False, elem_classes=["lib-save-accordion"]):
-                        with gr.Row():
-                            vd_lib_name = gr.Textbox(
-                                label="Voice Name", placeholder="my_narrator", scale=2
-                            )
-                            vd_lib_save = gr.Button("Save Voice to Library", scale=1)
-                        vd_lib_status = gr.Textbox(
-                            show_label=False, interactive=False,
-                            placeholder="Library status…",
-                            elem_classes=["save-status-text"],
-                        )
-                    # Batch Mode Accordion
-                    with gr.Accordion("Batch Mode", open=False, elem_classes=["batch-accordion"]):
-                        with gr.Row():
-                            vd_batch_split = gr.Radio(
-                                ["paragraph", "sentence", "line"],
-                                value=DEFAULT_BATCH_SPLIT_MODE,
-                                label="Split Mode",
-                            )
-                            vd_batch_silence = gr.Slider(
-                                0, 2000, value=DEFAULT_SILENCE_GAP_MS, step=50,
-                                label="Silence Gap (ms)",
-                            )
-                        vd_batch_generate = gr.Button("Generate Batch", variant="primary")
-                        vd_batch_table = gr.Dataframe(
-                            headers=["#", "Text", "Status"],
-                            value=[["", "", ""]],
-                            label="Batch Results",
-                            interactive=False,
-                        )
-                        vd_batch_audio = gr.Audio(label="Combined Output", type="numpy", interactive=False, buttons=["download"])
-                        with gr.Row():
-                            vd_batch_save = gr.Button("Save Combined Audio")
-                            vd_batch_status = gr.Textbox(label="Batch Status", interactive=False)
-                with gr.Column(scale=1, elem_classes=["output-col"]):
-                    vd_audio = gr.Audio(label="Output", type="numpy", interactive=False, buttons=["download"])
-                    vd_save = gr.Button("Save Audio")
-                    vd_save_status = gr.Textbox(
-                        show_label=False, interactive=False,
-                        placeholder="Save path appears here…",
-                        elem_classes=["save-status-text"],
-                    )
+        ui_ns = types.SimpleNamespace()
+        ui_ns.cv = cv_tab.build(ctx)
+        ui_ns.vd = vd_tab.build(ctx)
 
         # =================================================================
         # Tab 3: Voice Cloning
@@ -2116,63 +1748,10 @@ with gr.Blocks(title="Qwen3-TTS MLX Studio") as app:
     # Event wiring
     # ===================================================================
 
-    # --- Custom Voice ---
-    cv_generate.click(
-        fn=generate_custom_voice,
-        inputs=[cv_text, cv_speaker, cv_language, cv_instruct],
-        outputs=[cv_audio, status],
-        show_progress="minimal",
-    )
-    cv_save.click(
-        fn=lambda audio: save_audio(audio, "custom"),
-        inputs=[cv_audio],
-        outputs=[cv_save_status],
-    )
-    cv_batch_generate.click(
-        fn=_run_batch_custom_voice,
-        inputs=[cv_text, cv_speaker, cv_language, cv_instruct, cv_batch_split, cv_batch_silence],
-        outputs=[cv_batch_audio, cv_batch_table, cv_batch_status],
-        show_progress="full",
-    )
-    cv_batch_save.click(
-        fn=lambda audio: save_audio(audio, "batch_custom"),
-        inputs=[cv_batch_audio],
-        outputs=[cv_batch_status],
-    )
-
-    # --- Voice Design ---
-    vd_generate.click(
-        fn=generate_voice_design,
-        inputs=[vd_text, vd_language, vd_instruct],
-        outputs=[vd_audio, status],
-        show_progress="minimal",
-    )
-    vd_save.click(
-        fn=lambda audio: save_audio(audio, "design"),
-        inputs=[vd_audio],
-        outputs=[vd_save_status],
-    )
-    vd_batch_generate.click(
-        fn=_run_batch_voice_design,
-        inputs=[vd_text, vd_language, vd_instruct, vd_batch_split, vd_batch_silence],
-        outputs=[vd_batch_audio, vd_batch_table, vd_batch_status],
-        show_progress="full",
-    )
-    vd_batch_save.click(
-        fn=lambda audio: save_audio(audio, "batch_design"),
-        inputs=[vd_batch_audio],
-        outputs=[vd_batch_status],
-    )
-
-    def _save_design_and_refresh(*args):
-        result = save_design_to_library(*args)
-        return result, gr.update(choices=_voice_choices())
-
-    vd_lib_save.click(
-        fn=_save_design_and_refresh,
-        inputs=[vd_audio, vd_lib_name, vd_language, vd_instruct, vd_text],
-        outputs=[vd_lib_status, vc_library_voice],
-    )
+    ui_ns.status = status
+    ui_ns.vc = types.SimpleNamespace(vc_library_voice=vc_library_voice)
+    cv_tab.wire(ctx, ui_ns)
+    vd_tab.wire(ctx, ui_ns)
 
     # --- Voice Cloning ---
     vc_transcribe_btn.click(
@@ -2458,7 +2037,7 @@ with gr.Blocks(title="Qwen3-TTS MLX Studio") as app:
         ],
         outputs=[
             set_status, status,
-            cv_language, vd_language, vc_language, yt_language, asr_language, lib_import_language,
+            ui_ns.cv.cv_language, ui_ns.vd.vd_language, vc_language, yt_language, asr_language, lib_import_language,
         ],
     )
     set_preset.change(
