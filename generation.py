@@ -5,7 +5,10 @@ of the engine's generate methods.
 """
 import concurrent.futures
 import os
+import time
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Callable, Optional
 
 import gradio as gr
 
@@ -79,3 +82,164 @@ def loading_status(ctx, model_type):
     return (
         f"Downloading model on first run (~6 GB) — this may take several minutes… ({repo_id})"
     )
+
+
+# ---------------------------------------------------------------------------
+# Mode specs — per-mode validation, engine calls, and history fields
+# ---------------------------------------------------------------------------
+@dataclass
+class GenRequest:
+    mode: str                       # "custom_voice" | "voice_design" | "voice_clone"
+    text: str
+    language: str
+    speaker: str = ""               # custom_voice
+    instruct: str = ""              # style (custom_voice) or description (voice_design)
+    ref_audio: Optional[str] = None  # voice_clone
+    ref_text: str = ""              # voice_clone
+    library_voice: str = "None"     # voice_clone
+
+
+def _clone_voice_info(req):
+    return req.library_voice if req.library_voice and req.library_voice != "None" else "uploaded"
+
+
+def _validate_common(ctx, req):
+    if not req.text.strip():
+        gr.Warning("Please enter text to speak.")
+        return "Enter text first"
+    return None
+
+
+def _validate_design(ctx, req):
+    err = _validate_common(ctx, req)
+    if err:
+        return err
+    if not req.instruct.strip():
+        gr.Warning("Please describe the voice you want.")
+        return "Describe the voice first"
+    return None
+
+
+def _resolve_clone_library(ctx, req):
+    """Resolve a selected library voice onto ref_audio/ref_text. Returns error string or None."""
+    if req.library_voice and req.library_voice != "None":
+        try:
+            voice = ctx.library.load_voice(req.library_voice)
+            req.ref_audio = ctx.library.get_ref_audio_path(req.library_voice)
+            req.ref_text = voice["ref_text"]
+        except FileNotFoundError:
+            return "not found"
+    return None
+
+
+def _prepare_clone(ctx, req):
+    """Single-generation clone prep: library resolution + ref checks (app.py wording)."""
+    if _resolve_clone_library(ctx, req):
+        gr.Warning(f"Voice '{req.library_voice}' not found in library.")
+        return None, "Voice not found"
+    if not req.ref_audio:
+        gr.Warning("Please upload reference audio or select from library.")
+        return None, "No reference audio"
+    if not req.ref_text or not req.ref_text.strip():
+        gr.Warning("Reference transcript is required for voice cloning.")
+        return None, "No reference transcript"
+    return req, None
+
+
+def _no_prepare(ctx, req):
+    return req, None
+
+
+def _no_extras(ctx):
+    return ""
+
+
+def _clone_extras(ctx):
+    return " | Noise reduction applied" if ctx.settings.denoise_ref else ""
+
+
+@dataclass
+class ModeSpec:
+    model_type: str
+    save_prefix: str
+    validate: Callable              # (ctx, req) -> error string | None
+    prepare: Callable               # (ctx, req) -> (req | None, error string | None)
+    call_single: Callable           # (ctx, req, **gen_kwargs) -> (sr, audio)
+    history_kwargs: Callable        # (req) -> dict of extra history.add fields
+    status_extras: Callable         # (ctx) -> str appended before the save message
+
+
+MODES = {
+    "custom_voice": ModeSpec(
+        model_type="custom_voice", save_prefix="custom",
+        validate=_validate_common,
+        prepare=_no_prepare,
+        call_single=lambda ctx, req, **kw: ctx.engine.generate_custom_voice(
+            req.text, req.speaker, req.language, req.instruct, **kw),
+        history_kwargs=lambda req: dict(
+            speaker=req.speaker,
+            voice_params=req.instruct if req.instruct else ""),
+        status_extras=_no_extras,
+    ),
+    "voice_design": ModeSpec(
+        model_type="voice_design", save_prefix="design",
+        validate=_validate_design,
+        prepare=_no_prepare,
+        call_single=lambda ctx, req, **kw: ctx.engine.generate_voice_design(
+            req.text, req.language, req.instruct, **kw),
+        history_kwargs=lambda req: dict(voice_params=req.instruct),
+        status_extras=_no_extras,
+    ),
+    "voice_clone": ModeSpec(
+        model_type="base", save_prefix="clone",
+        validate=_validate_common,
+        prepare=_prepare_clone,
+        call_single=lambda ctx, req, **kw: ctx.engine.generate_voice_clone(
+            req.text, req.ref_audio, req.ref_text, req.language,
+            denoise_ref=ctx.settings.denoise_ref, **kw),
+        history_kwargs=lambda req: dict(
+            voice_params=f"ref: {_clone_voice_info(req)}"),
+        status_extras=_clone_extras,
+    ),
+}
+
+
+def run_single(ctx, req):
+    """Shared single-generation pipeline. Yields (audio_update, status_text)."""
+    spec = MODES[req.mode]
+    err = spec.validate(ctx, req)
+    if err:
+        yield None, err
+        return
+    req, err = spec.prepare(ctx, req)
+    if err:
+        yield None, err
+        return
+    msg = loading_status(ctx, spec.model_type)
+    if msg:
+        yield None, msg
+    try:
+        start = time.time()
+        sr, audio = generate_with_timeout(
+            spec.call_single, ctx, req,
+            timeout_seconds=ctx.settings.timeout,
+            **ctx.settings.gen_kwargs(),
+        )
+        elapsed = time.time() - start
+        result = (sr, audio)
+        ctx.history.add(mode=req.mode, text=req.text, language=req.language,
+                        audio=result, **spec.history_kwargs(req))
+        save_msg = ""
+        if ctx.settings.autosave:
+            save_msg = " | " + save_audio(ctx, result, spec.save_prefix)
+        yield (
+            gr.update(value=result),
+            f"Generated in {elapsed:.1f}s | Model: "
+            f"{ctx.engine.get_repo_id(spec.model_type)}{spec.status_extras(ctx)}{save_msg}",
+        )
+    except GenerationTimeout as e:
+        gr.Warning(str(e))
+        yield None, str(e)
+    except Exception as e:
+        gr.Warning(f"Generation failed: {e}")
+        yield None, f"Error: {e}"
