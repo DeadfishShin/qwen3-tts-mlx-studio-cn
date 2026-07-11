@@ -1,0 +1,439 @@
+"""Script Mode tab: multi-speaker scripts with per-speaker voice assignment."""
+import types
+
+import gradio as gr
+
+from config import DEFAULT_SCRIPT_SILENCE_MS, DEFAULT_SPEAKERS, LANGUAGES, MAX_SCRIPT_SPEAKERS
+from audio_utils import concatenate_audio
+from generation import generate_with_timeout, save_audio
+from script_parser import group_by_model_type, parse_script
+from ui.components import format_table_md, voice_choices
+
+
+def build(ctx):
+    with gr.Tab("Script Mode") as script_tab:
+        gr.HTML(
+            "<div class='info-notice'>"
+            "<strong>Multi-Speaker Script</strong> &nbsp;—&nbsp; "
+            "Each line: <code>SPEAKER: Dialogue text</code> &nbsp; Lines without a label are narration."
+            "</div>"
+        )
+        with gr.Row():
+            with gr.Column(scale=2):
+                sm_script = gr.Textbox(
+                    label="Script",
+                    lines=10,
+                    placeholder=(
+                        "NARRATOR: Once upon a time, there lived a curious inventor.\n"
+                        "EMMA: Father, look what I found in the attic!\n"
+                        "FATHER: That is something I built a long time ago."
+                    ),
+                    elem_classes=["script-editor"],
+                )
+                with gr.Row():
+                    sm_parse_btn = gr.Button("Parse Script", variant="primary", scale=1)
+                    sm_silence = gr.Slider(
+                        0, 2000, value=DEFAULT_SCRIPT_SILENCE_MS, step=50,
+                        label="Silence Between Lines (ms)", scale=2,
+                    )
+                sm_parse_status = gr.Textbox(label="Parse Result", interactive=False, lines=2)
+
+                # Voice assignment state
+                sm_assignments = gr.State({})
+
+                gr.Markdown("### Voice Assignments")
+                # Pre-allocate speaker slots (show/hide based on parse)
+                sm_speaker_groups = []
+                sm_speaker_modes = []
+                sm_speaker_speakers = []
+                sm_speaker_instructs = []
+                sm_speaker_languages = []
+                sm_speaker_lib_voices = []
+
+                for i in range(MAX_SCRIPT_SPEAKERS):
+                    with gr.Group(visible=False, elem_classes=[f"speaker-slot-{i}"]) as grp:
+                        sm_speaker_groups.append(grp)
+                        with gr.Row():
+                            mode = gr.Radio(
+                                ["Custom Voice", "Voice Design", "Voice Clone"],
+                                value="Custom Voice",
+                                label=f"Speaker {i+1} Mode",
+                                scale=2,
+                            )
+                            sm_speaker_modes.append(mode)
+                            lang = gr.Dropdown(
+                                choices=LANGUAGES, value="English",
+                                label="Language", scale=1,
+                            )
+                            sm_speaker_languages.append(lang)
+                        with gr.Row():
+                            spk = gr.Dropdown(
+                                choices=DEFAULT_SPEAKERS,
+                                value=DEFAULT_SPEAKERS[0],
+                                label="Speaker",
+                                scale=1,
+                            )
+                            sm_speaker_speakers.append(spk)
+                            inst = gr.Textbox(
+                                label="Instruct / Description",
+                                placeholder="Style instruction or voice description",
+                                scale=2,
+                            )
+                            sm_speaker_instructs.append(inst)
+                            lib_v = gr.Dropdown(
+                                choices=voice_choices(ctx),
+                                value="None",
+                                label="Library Voice",
+                                scale=1,
+                            )
+                            sm_speaker_lib_voices.append(lib_v)
+
+                with gr.Row():
+                    sm_generate_btn = gr.Button("Generate Script", variant="primary")
+                    sm_save_btn = gr.Button("Save Combined Audio")
+                with gr.Accordion("Per-line breakdown", open=False):
+                    sm_table = gr.Markdown(value="*Results will appear after generation.*")
+
+            with gr.Column(scale=1):
+                sm_audio = gr.Audio(label="Combined Output", type="numpy", interactive=False, buttons=["download"])
+                sm_status = gr.Textbox(label="Status", interactive=False)
+    return types.SimpleNamespace(
+        script_tab=script_tab, sm_script=sm_script, sm_parse_btn=sm_parse_btn,
+        sm_silence=sm_silence, sm_parse_status=sm_parse_status,
+        sm_assignments=sm_assignments,
+        sm_speaker_groups=sm_speaker_groups, sm_speaker_modes=sm_speaker_modes,
+        sm_speaker_speakers=sm_speaker_speakers,
+        sm_speaker_instructs=sm_speaker_instructs,
+        sm_speaker_languages=sm_speaker_languages,
+        sm_speaker_lib_voices=sm_speaker_lib_voices,
+        sm_generate_btn=sm_generate_btn, sm_save_btn=sm_save_btn,
+        sm_table=sm_table, sm_audio=sm_audio, sm_status=sm_status,
+    )
+
+
+def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progress=gr.Progress()):
+    """Generate audio for a parsed multi-speaker script.
+
+    assignments_state is a dict mapping speaker name to voice config:
+      {speaker: {"mode": ..., "speaker": ..., "language": ..., "instruct": ..., "library_voice": ...}}
+    """
+    if not raw_text.strip():
+        gr.Warning("Enter a script first.")
+        return None, "*Enter a script first.*", "Enter script first"
+
+    parsed = parse_script(raw_text)
+    if parsed.errors:
+        gr.Warning(parsed.errors[0])
+        return None, f"*{parsed.errors[0]}*", parsed.errors[0]
+
+    if not assignments_state:
+        gr.Warning("Parse the script and assign voices first.")
+        return None, "*Parse the script and assign voices first.*", "Parse script first"
+
+    # Group lines by model type for efficient model swapping
+    groups = group_by_model_type(parsed.lines, assignments_state)
+
+    audio_by_line_number = {}  # line_number -> (sr, audio)
+    table_rows = []
+    succeeded, failed = 0, 0
+
+    model_type_labels = {
+        "custom_voice": "Custom Voice",
+        "voice_design": "Voice Design",
+        "base": "Voice Clone",
+    }
+
+    total_lines = len(parsed.lines)
+    done = 0
+
+    for model_type, lines in groups.items():
+        label = model_type_labels.get(model_type, model_type)
+        batch_size = ctx.settings.batch_size
+
+        if model_type in ("custom_voice", "voice_design") and batch_size > 1:
+            # Batch generation for Custom Voice and Voice Design
+            for batch_start in range(0, len(lines), batch_size):
+                batch_lines = lines[batch_start:batch_start + batch_size]
+                texts = [l.text for l in batch_lines]
+
+                try:
+                    if model_type == "custom_voice":
+                        speakers = []
+                        instructs = []
+                        lang = None
+                        for line in batch_lines:
+                            assignment = assignments_state.get(line.speaker, {})
+                            lang = assignment.get("language", "English")
+                            speakers.append(assignment.get("speaker", DEFAULT_SPEAKERS[0]))
+                            instructs.append(assignment.get("instruct", ""))
+
+                        results = generate_with_timeout(
+                            ctx.engine.batch_generate_custom_voice,
+                            texts, speakers, lang, instructs,
+                            timeout_seconds=ctx.settings.timeout,
+                            **ctx.settings.gen_kwargs(),
+                        )
+                    else:  # voice_design
+                        instructs = []
+                        lang = None
+                        for line in batch_lines:
+                            assignment = assignments_state.get(line.speaker, {})
+                            lang = assignment.get("language", "English")
+                            instructs.append(assignment.get("instruct", ""))
+
+                        results = generate_with_timeout(
+                            ctx.engine.batch_generate_voice_design,
+                            texts, lang, instructs,
+                            timeout_seconds=ctx.settings.timeout,
+                            **ctx.settings.gen_kwargs(),
+                        )
+
+                    for j, (sr, audio) in enumerate(results):
+                        audio_by_line_number[batch_lines[j].line_number] = (sr, audio)
+                        succeeded += 1
+                        done += 1
+                        progress(done / total_lines, desc=f"Generating {label} lines...")
+
+                except Exception:
+                    # Batch failed — retry each line individually
+                    for line in batch_lines:
+                        assignment = assignments_state.get(line.speaker, {})
+                        lang = assignment.get("language", "English")
+                        try:
+                            if model_type == "custom_voice":
+                                sr, audio = generate_with_timeout(
+                                    ctx.engine.generate_custom_voice,
+                                    line.text,
+                                    assignment.get("speaker", DEFAULT_SPEAKERS[0]),
+                                    lang,
+                                    assignment.get("instruct", ""),
+                                    timeout_seconds=ctx.settings.timeout,
+                                    **ctx.settings.gen_kwargs(),
+                                )
+                            else:
+                                sr, audio = generate_with_timeout(
+                                    ctx.engine.generate_voice_design,
+                                    line.text,
+                                    lang,
+                                    assignment.get("instruct", ""),
+                                    timeout_seconds=ctx.settings.timeout,
+                                    **ctx.settings.gen_kwargs(),
+                                )
+                            audio_by_line_number[line.line_number] = (sr, audio)
+                            succeeded += 1
+                        except Exception:
+                            audio_by_line_number[line.line_number] = None
+                            failed += 1
+                        done += 1
+                        progress(done / total_lines)
+        else:
+            # Sequential generation (Voice Clone, or batch_size == 1)
+            for line in lines:
+                assignment = assignments_state.get(line.speaker, {})
+                mode = assignment.get("mode", "custom_voice")
+                lang = assignment.get("language", "English")
+
+                try:
+                    if mode == "custom_voice":
+                        sr, audio = generate_with_timeout(
+                            ctx.engine.generate_custom_voice,
+                            line.text,
+                            assignment.get("speaker", DEFAULT_SPEAKERS[0]),
+                            lang,
+                            assignment.get("instruct", ""),
+                            timeout_seconds=ctx.settings.timeout,
+                            **ctx.settings.gen_kwargs(),
+                        )
+                    elif mode == "voice_design":
+                        sr, audio = generate_with_timeout(
+                            ctx.engine.generate_voice_design,
+                            line.text,
+                            lang,
+                            assignment.get("instruct", ""),
+                            timeout_seconds=ctx.settings.timeout,
+                            **ctx.settings.gen_kwargs(),
+                        )
+                    elif mode == "voice_clone":
+                        lib_voice = assignment.get("library_voice", "")
+                        if not lib_voice or lib_voice == "None":
+                            raise ValueError("No library voice selected for clone mode")
+                        voice = ctx.library.load_voice(lib_voice)
+                        ref_audio_path = ctx.library.get_ref_audio_path(lib_voice)
+                        ref_text = voice["ref_text"]
+                        sr, audio = generate_with_timeout(
+                            ctx.engine.generate_voice_clone,
+                            line.text, ref_audio_path, ref_text, lang,
+                            denoise_ref=ctx.settings.denoise_ref,
+                            timeout_seconds=ctx.settings.timeout,
+                            **ctx.settings.gen_kwargs(),
+                        )
+                    else:
+                        raise ValueError(f"Unknown mode: {mode}")
+
+                    audio_by_line_number[line.line_number] = (sr, audio)
+                    succeeded += 1
+                except Exception:
+                    audio_by_line_number[line.line_number] = None
+                    failed += 1
+
+                done += 1
+                progress(done / total_lines)
+
+    # Reassemble in script order and build results table
+    audio_segments = []
+    for line in parsed.lines:
+        preview = line.text[:40] + "..." if len(line.text) > 40 else line.text
+        result = audio_by_line_number.get(line.line_number)
+        if result is not None:
+            sr, audio = result
+            duration = len(audio) / sr
+            audio_segments.append((sr, audio))
+            table_rows.append([str(line.line_number), line.speaker, preview, f"{duration:.1f}s"])
+        else:
+            table_rows.append([str(line.line_number), line.speaker, preview, "Failed"])
+
+    if not audio_segments:
+        return None, format_table_md(["Line", "Speaker", "Text", "Status"], table_rows, "*No results.*"), "All lines failed"
+
+    combined = concatenate_audio(audio_segments, silence_ms=int(silence_ms))
+    # Record to history
+    speakers_used = ", ".join(parsed.speakers[:4])
+    if len(parsed.speakers) > 4:
+        speakers_used += "..."
+    ctx.history.add(
+        mode="custom_voice",
+        text=f"[Script: {succeeded} lines, speakers: {speakers_used}]",
+        language="Multi", audio=combined,
+        voice_params="script mode",
+    )
+
+    status_msg = f"Generated {succeeded}/{total_lines} lines"
+    if failed:
+        status_msg += f" ({failed} failed)"
+    if ctx.settings.denoise_ref:
+        status_msg += " | Noise reduction applied"
+    return gr.update(value=combined), format_table_md(["Line", "Speaker", "Text", "Status"], table_rows, "*No results.*"), status_msg
+
+
+def wire(ctx, ui):
+    t = ui.sm
+
+    def _parse_and_update_slots(raw_text):
+        """Parse script and update speaker slot visibility."""
+        if not raw_text.strip():
+            gr.Warning("Enter a script first.")
+            updates = [gr.update(visible=False) for _ in range(MAX_SCRIPT_SPEAKERS)]
+            return *updates, "Enter a script first", {}
+
+        parsed = parse_script(raw_text)
+
+        if parsed.errors:
+            gr.Warning(parsed.errors[0])
+            updates = [gr.update(visible=False) for _ in range(MAX_SCRIPT_SPEAKERS)]
+            return *updates, "; ".join(parsed.errors), {}
+
+        # Build summary
+        summary_parts = [f"Found {len(parsed.speakers)} speakers, {len(parsed.lines)} lines:"]
+        lines_per_speaker = {}
+        for line in parsed.lines:
+            lines_per_speaker.setdefault(line.speaker, 0)
+            lines_per_speaker[line.speaker] += 1
+        for spk in parsed.speakers:
+            count = lines_per_speaker.get(spk, 0)
+            summary_parts.append(f"  {spk}: {count} lines")
+
+        # Build visibility updates for speaker slots
+        updates = []
+        for i in range(MAX_SCRIPT_SPEAKERS):
+            if i < len(parsed.speakers):
+                updates.append(gr.update(visible=True))
+            else:
+                updates.append(gr.update(visible=False))
+
+        # Initial assignments state
+        assignments = {}
+        for spk in parsed.speakers:
+            assignments[spk] = {
+                "mode": "custom_voice",
+                "speaker": DEFAULT_SPEAKERS[0],
+                "language": "English",
+                "instruct": "",
+                "library_voice": "None",
+            }
+
+        return *updates, "\n".join(summary_parts), assignments
+
+    def _build_assignments_from_slots(current_assignments, script_text,
+                                      *slot_values):
+        """Rebuild assignments dict from all speaker slot values."""
+        if not current_assignments or not script_text.strip():
+            return current_assignments
+
+        parsed = parse_script(script_text)
+        if parsed.errors or not parsed.speakers:
+            return current_assignments
+
+        # slot_values: for each of MAX_SCRIPT_SPEAKERS slots:
+        #   mode, speaker, instruct, language, library_voice
+        values_per_slot = 5
+        assignments = {}
+        mode_map = {
+            "Custom Voice": "custom_voice",
+            "Voice Design": "voice_design",
+            "Voice Clone": "voice_clone",
+        }
+        for i, spk in enumerate(parsed.speakers):
+            if i >= MAX_SCRIPT_SPEAKERS:
+                break
+            base = i * values_per_slot
+            mode_label = slot_values[base] if base < len(slot_values) else "Custom Voice"
+            assignments[spk] = {
+                "mode": mode_map.get(mode_label, "custom_voice"),
+                "speaker": slot_values[base + 1] if base + 1 < len(slot_values) else DEFAULT_SPEAKERS[0],
+                "instruct": slot_values[base + 2] if base + 2 < len(slot_values) else "",
+                "language": slot_values[base + 3] if base + 3 < len(slot_values) else "English",
+                "library_voice": slot_values[base + 4] if base + 4 < len(slot_values) else "None",
+            }
+
+        return assignments
+
+    def _generate_script_with_assignments(raw_text, assignments, silence_ms, *slot_values, progress=gr.Progress()):
+        """Build fresh assignments from slot values, then generate."""
+        fresh = _build_assignments_from_slots(assignments, raw_text, *slot_values)
+        return generate_script_handler(ctx, raw_text, fresh, silence_ms, progress)
+
+    def _refresh_script_lib_voices():
+        choices = voice_choices(ctx)
+        return [gr.update(choices=choices) for _ in range(MAX_SCRIPT_SPEAKERS)]
+
+    # Collect all slot control components in order
+    all_slot_controls = []
+    for i in range(MAX_SCRIPT_SPEAKERS):
+        all_slot_controls.extend([
+            t.sm_speaker_modes[i],
+            t.sm_speaker_speakers[i],
+            t.sm_speaker_instructs[i],
+            t.sm_speaker_languages[i],
+            t.sm_speaker_lib_voices[i],
+        ])
+
+    t.sm_parse_btn.click(
+        fn=_parse_and_update_slots,
+        inputs=[t.sm_script],
+        outputs=[*t.sm_speaker_groups, t.sm_parse_status, t.sm_assignments],
+    )
+    t.sm_generate_btn.click(
+        fn=_generate_script_with_assignments,
+        inputs=[t.sm_script, t.sm_assignments, t.sm_silence, *all_slot_controls],
+        outputs=[t.sm_audio, t.sm_table, t.sm_status],
+        show_progress="full",
+    )
+    t.sm_save_btn.click(
+        fn=lambda audio: save_audio(ctx, audio, "script"),
+        inputs=[t.sm_audio],
+        outputs=[t.sm_status],
+    )
+    t.script_tab.select(
+        fn=_refresh_script_lib_voices,
+        outputs=t.sm_speaker_lib_voices,
+    )

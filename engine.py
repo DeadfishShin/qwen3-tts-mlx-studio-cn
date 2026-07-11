@@ -139,14 +139,18 @@ class TTSEngine:
     def batch_generate_custom_voice(self, texts, speaker, language, instruct="", **kwargs):
         """Generate audio for multiple texts in one batched forward pass.
 
-        Returns list of (sample_rate, numpy_audio_array) in input order.
+        speaker and instruct may each be a single value (applied to every text)
+        or a per-text list. Returns list of (sample_rate, numpy_audio_array)
+        in input order.
         """
         self._acquire_lock()
         try:
             self._load_model("custom_voice")
             batch_size = len(texts)
-            speakers = [speaker] * batch_size
-            instructs = [instruct] * batch_size
+            speakers = (list(speaker) if isinstance(speaker, (list, tuple))
+                        else [speaker] * batch_size)
+            instructs = (list(instruct) if isinstance(instruct, (list, tuple))
+                         else [instruct] * batch_size)
             results = list(
                 self.current_model.batch_generate(
                     texts=texts,
@@ -165,13 +169,15 @@ class TTSEngine:
     def batch_generate_voice_design(self, texts, language, instruct, **kwargs):
         """Generate audio for multiple texts in one batched forward pass.
 
-        Returns list of (sample_rate, numpy_audio_array) in input order.
+        instruct may be a single value (applied to every text) or a per-text
+        list. Returns list of (sample_rate, numpy_audio_array) in input order.
         """
         self._acquire_lock()
         try:
             self._load_model("voice_design")
             batch_size = len(texts)
-            instructs = [instruct] * batch_size
+            instructs = (list(instruct) if isinstance(instruct, (list, tuple))
+                         else [instruct] * batch_size)
             results = list(
                 self.current_model.batch_generate(
                     texts=texts,
