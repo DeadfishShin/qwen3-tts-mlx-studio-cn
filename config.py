@@ -70,6 +70,9 @@ DEFAULT_DENOISE_REF = False     # DeepFilterNet ref audio denoising
 # DeepFilterNet model (8MB, cached after first download)
 DEEPFILTER_REPO = "mlx-community/DeepFilterNet-mlx"
 
+# Silero VAD model (~2MB) for trimming reference-clip silence
+VAD_REPO = "mlx-community/silero-vad"
+
 # JIT compilation — set False to disable if you hit issues
 ENABLE_JIT_COMPILE = True
 
