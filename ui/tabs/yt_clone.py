@@ -7,8 +7,10 @@ import gradio as gr
 from config import LANGUAGE_AUTO, LANGUAGES
 from generation import (
     GenerationCancelled, GenerationTimeout, GenRequest, generate_once, save_audio,
+    stream_transcription,
 )
-from ui.components import voice_choices, voice_table
+from ui import strings as S
+from ui.components import voice_choices, voice_table, wire_run_lifecycle, wire_stop
 from ui.tabs.voice_clone import save_clone_to_library
 
 
@@ -52,7 +54,9 @@ def build(ctx):
                     lines=3,
                     placeholder="Transcript appears here after extraction, or enter manually…",
                 )
-                yt_transcribe_btn = gr.Button("Transcribe Clip", variant="secondary")
+                with gr.Row():
+                    yt_transcribe_btn = gr.Button("Transcribe Clip", variant="secondary")
+                    yt_stop_btn = gr.Button(S.STOP, variant="stop", visible=False)
                 gr.HTML("<div class='text-hint'>Use ASR when subtitles are unavailable or inaccurate</div>")
 
                 gr.Markdown("**Step 4 — Generate & Save**", elem_classes=["yt-step"])
@@ -99,6 +103,7 @@ def build(ctx):
         yt_start=yt_start, yt_end=yt_end, yt_extract_btn=yt_extract_btn,
         yt_trim_ref=yt_trim_ref,
         yt_transcript=yt_transcript, yt_transcribe_btn=yt_transcribe_btn,
+        yt_stop_btn=yt_stop_btn,
         yt_text=yt_text, yt_language=yt_language, yt_voice_name=yt_voice_name,
         yt_clone_btn=yt_clone_btn, yt_thumbnail=yt_thumbnail,
         yt_video_info=yt_video_info, yt_clip_audio=yt_clip_audio,
@@ -217,20 +222,12 @@ def extract_yt_clip(ctx, url, start_str, end_str, video_state, progress=gr.Progr
 
 
 def transcribe_yt_clip(ctx, clip_audio):
-    """Transcribe extracted YT clip audio."""
+    """Transcribe extracted YT clip audio (streams live)."""
     if not clip_audio:
         gr.Warning("Extract a clip first (Step 2).")
-        return gr.update(), "No clip to transcribe"
-    yield gr.update(), "Loading ASR model..."
-    try:
-        text = ctx.engine.transcribe(clip_audio, language="auto")
-        if not text or not text.strip():
-            yield gr.update(), "Transcription returned empty"
-            return
-        yield gr.update(value=text.strip()), f"Transcribed ({len(text.split())} words)"
-    except Exception as e:
-        gr.Warning(f"Transcription failed: {e}")
-        yield gr.update(), f"Error: {e}"
+        yield gr.update(), "No clip to transcribe"
+        return
+    yield from stream_transcription(ctx, clip_audio, "auto")
 
 
 def clone_yt_voice(ctx, text, ref_audio, transcript, language, voice_name, trim_ref=True):
@@ -315,17 +312,16 @@ def wire(ctx, ui):
         outputs=[t.yt_clip_audio, t.yt_transcript, t.yt_status],
         show_progress="full",
     )
-    t.yt_transcribe_btn.click(
-        fn=on_transcribe,
+    wire_stop(ctx, t.yt_stop_btn, t.yt_status)
+    wire_run_lifecycle(
+        t.yt_transcribe_btn, t.yt_stop_btn, on_transcribe,
         inputs=[t.yt_clip_audio],
         outputs=[t.yt_transcript, t.yt_status],
-        show_progress="minimal",
     )
-    t.yt_clone_btn.click(
-        fn=on_clone,
+    wire_run_lifecycle(
+        t.yt_clone_btn, t.yt_stop_btn, on_clone,
         inputs=[t.yt_text, t.yt_clip_audio, t.yt_transcript, t.yt_language, t.yt_voice_name,
                 t.yt_trim_ref],
         outputs=[t.yt_audio_out, ui.status, t.yt_status,
                  ui.vc.vc_library_voice, ui.lib.lib_table],
-        show_progress="minimal",
     )

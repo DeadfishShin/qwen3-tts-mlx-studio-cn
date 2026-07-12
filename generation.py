@@ -59,6 +59,36 @@ def generate_once(ctx, req):
     return stream_to_audio(ctx, spec.call_stream(ctx, req, **ctx.settings.gen_kwargs()))
 
 
+def stream_transcription(ctx, audio_path, language):
+    """Stream ASR text into a textbox. Yields (textbox_update, status).
+
+    Cancel is checked between token deltas; a stopped run keeps the partial
+    transcript in the textbox.
+    """
+    ctx.cancel_event.clear()
+    yield gr.skip(), S.ASR_LOADING
+    text = ""
+    stream = ctx.engine.stream_transcribe(audio_path, language=language)
+    try:
+        for delta in stream:
+            text += delta
+            words = len(text.split())
+            yield gr.update(value=text.strip()), S.TRANSCRIBING.format(words=words)
+            if ctx.cancel_event.is_set():
+                yield gr.update(value=text.strip()), S.TRANSCRIBE_STOPPED
+                return
+    except Exception as e:
+        gr.Warning(f"Transcription failed: {e}")
+        yield gr.skip(), f"Error: {e}"
+        return
+    finally:
+        stream.close()
+    if not text.strip():
+        yield gr.skip(), "Transcription returned empty"
+        return
+    yield gr.update(value=text.strip()), f"Transcribed ({len(text.split())} words)"
+
+
 def save_audio(ctx, audio_tuple, prefix="output"):
     """Save generated audio to the configured output directory."""
     if audio_tuple is None:

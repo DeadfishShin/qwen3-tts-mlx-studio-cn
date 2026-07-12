@@ -4,7 +4,7 @@ import types
 import gradio as gr
 
 from config import LANGUAGES
-from generation import GenRequest, run_batch, run_single, save_audio
+from generation import GenRequest, run_batch, run_single, save_audio, stream_transcription
 from ui import strings as S
 from ui.components import (
     build_batch_accordion, build_lib_save_accordion, build_output_column,
@@ -67,20 +67,12 @@ def build(ctx):
 
 
 def transcribe_reference(ctx, ref_audio):
-    """Transcribe reference audio and fill the transcript box."""
+    """Transcribe reference audio and fill the transcript box (streams live)."""
     if not ref_audio:
         gr.Warning("Upload reference audio first.")
-        return gr.update(), "No audio to transcribe"
-    yield gr.update(), "Loading ASR model..."
-    try:
-        text = ctx.engine.transcribe(ref_audio, language="auto")
-        if not text or not text.strip():
-            yield gr.update(), "Transcription returned empty — try a clearer clip"
-            return
-        yield gr.update(value=text.strip()), f"Transcribed ({len(text.split())} words)"
-    except Exception as e:
-        gr.Warning(f"Transcription failed: {e}")
-        yield gr.update(), f"Error: {e}"
+        yield gr.update(), "No audio to transcribe"
+        return
+    yield from stream_transcription(ctx, ref_audio, "auto")
 
 
 def save_clone_to_library(ctx, ref_audio, ref_text, name, language):
