@@ -96,8 +96,6 @@ SCRIPT_STOPPED = "Stopped — completed {done}/{total} lines"
 ASR_LOADING = "Loading ASR model..."
 TRANSCRIBING = "Transcribing… {words} words"
 TRANSCRIBE_STOPPED = "Stopped — partial transcript kept"
-STREAM_PLAYBACK_LABEL = "Play audio while it generates"
-STREAM_PLAYBACK_INFO = "Streams sound to the player as it is generated (single generations)"
 TIMEOUT_SLIDER_INFO = "Auto-stops a run after this many seconds, keeping partial audio"
 
 # --- Table empty states ---

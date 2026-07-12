@@ -85,15 +85,11 @@ def build_batch_accordion():
 def build_output_column():
     """The right-hand output column shared by the three generation tabs.
 
-    The audio player is a streaming component (chunks play as they arrive;
-    Gradio combines them into the final file). result_state holds the
-    authoritative full-quality waveform for Save — the streamed file is
-    playback UX only.
+    A regular (non-streaming) player: waveform view, smooth playback. The
+    complete or Stop-kept-partial waveform lands here when the run ends.
     """
     with gr.Column(scale=1, elem_classes=["output-col"]):
-        audio = gr.Audio(label=S.OUTPUT, type="numpy", streaming=True, autoplay=True,
-                         interactive=False, buttons=["download"])
-        result_state = gr.State(None)
+        audio = gr.Audio(label=S.OUTPUT, type="numpy", interactive=False, buttons=["download"])
         stop = gr.Button(S.STOP, variant="stop", visible=False)
         save = gr.Button(S.SAVE_AUDIO)
         save_status = gr.Textbox(
@@ -101,8 +97,7 @@ def build_output_column():
             placeholder=S.SAVE_PATH_PLACEHOLDER,
             elem_classes=["save-status-text"],
         )
-    return types.SimpleNamespace(audio=audio, result_state=result_state, stop=stop,
-                                 save=save, save_status=save_status)
+    return types.SimpleNamespace(audio=audio, stop=stop, save=save, save_status=save_status)
 
 
 def wire_run_lifecycle(start_btn, stop_btn, fn, inputs, outputs, show_progress="minimal"):

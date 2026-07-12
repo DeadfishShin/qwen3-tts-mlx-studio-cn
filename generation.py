@@ -320,24 +320,24 @@ MODES = {
 def run_single(ctx, req):
     """Shared single-generation pipeline.
 
-    Yields (audio_out, result_state, status). audio_out feeds a streaming
-    gr.Audio (per-chunk tuples while generating); result_state receives the
-    authoritative full waveform for Save/history — the streamed file is
-    playback UX only (Gradio normalizes each chunk independently). Cancel
-    and timeout are cooperative, checked between chunks.
+    Yields (audio_update, status). Generation still runs through the engine's
+    streaming generator internally — that is what makes the live "Generating…
+    Xs" status and cooperative Stop/timeout possible — but the player only
+    receives the complete waveform at the end (live chunk playback proved
+    unusable on hardware where generation is slower than real-time).
     """
     spec = MODES[req.mode]
     err = spec.validate(ctx, req)
     if err:
-        yield gr.skip(), gr.skip(), err
+        yield gr.skip(), err
         return
     req, err = spec.prepare(ctx, req)
     if err:
-        yield gr.skip(), gr.skip(), err
+        yield gr.skip(), err
         return
     msg = loading_status(ctx, spec.model_type)
     if msg:
-        yield gr.skip(), gr.skip(), msg
+        yield gr.skip(), msg
 
     ctx.cancel_event.clear()
     sr, parts = None, []
@@ -353,8 +353,7 @@ def run_single(ctx, req):
             if first_chunk_at is None:
                 first_chunk_at = now
             secs = sum(len(p) for p in parts) / sr
-            audio_out = (csr, chunk) if ctx.settings.stream_playback else gr.skip()
-            yield audio_out, gr.skip(), S.GENERATING_STATUS.format(secs=secs)
+            yield gr.skip(), S.GENERATING_STATUS.format(secs=secs)
             if ctx.cancel_event.is_set():
                 stopped = True
                 break
@@ -363,23 +362,22 @@ def run_single(ctx, req):
                 break
     except Exception as e:
         gr.Warning(f"Generation failed: {e}")
-        yield gr.skip(), gr.skip(), f"Error: {e}"
+        yield gr.skip(), f"Error: {e}"
         return
     finally:
         stream.close()
 
     if not parts:
-        yield gr.skip(), gr.skip(), "No audio produced"
+        yield gr.skip(), "No audio produced"
         return
     result = (sr, np.concatenate(parts))
     secs = len(result[1]) / sr
-    final_audio = result if not ctx.settings.stream_playback else gr.skip()
     if stopped or timed_out:
         # Partial takes are for immediate listening/manual save only:
         # no history entry, no autosave.
         status = (S.TIMED_OUT_KEPT.format(timeout=ctx.settings.timeout, secs=secs)
                   if timed_out else S.STOPPED_KEPT.format(secs=secs))
-        yield final_audio, result, status
+        yield result, status
         return
     elapsed = time.monotonic() - start
     ctx.history.add(mode=req.mode, text=req.text, language=req.language,
@@ -387,7 +385,7 @@ def run_single(ctx, req):
     save_msg = ""
     if ctx.settings.autosave:
         save_msg = " | " + save_audio(ctx, result, spec.save_prefix)
-    yield final_audio, result, (
+    yield result, (
         f"Generated in {elapsed:.1f}s | Model: "
         f"{ctx.engine.get_repo_id(spec.model_type)}{spec.status_extras(ctx)}{save_msg}")
 

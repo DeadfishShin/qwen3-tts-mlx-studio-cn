@@ -61,7 +61,7 @@ def build(ctx):
         vc_batch_generate=batch.batch_generate, vc_batch_table=batch.batch_table,
         vc_batch_audio=batch.batch_audio, vc_batch_save=batch.batch_save,
         vc_batch_status=batch.batch_status,
-        vc_audio=out.audio, vc_result=out.result_state, vc_stop=out.stop,
+        vc_audio=out.audio, vc_stop=out.stop,
         vc_save=out.save, vc_save_status=out.save_status,
     )
 
@@ -132,11 +132,11 @@ def wire(ctx, ui):
         t.vc_generate, t.vc_stop, on_generate,
         inputs=[t.vc_text, t.vc_ref_audio, t.vc_ref_text, t.vc_language, t.vc_library_voice,
                 t.vc_trim_ref],
-        outputs=[t.vc_audio, t.vc_result, ui.status],
+        outputs=[t.vc_audio, ui.status],
     )
     t.vc_save.click(
         fn=lambda audio: save_audio(ctx, audio, "clone"),
-        inputs=[t.vc_result],
+        inputs=[t.vc_audio],
         outputs=[t.vc_save_status],
     )
     wire_run_lifecycle(

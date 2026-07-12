@@ -10,8 +10,7 @@ from config import (
     LANGUAGE_AUTO,
     DEFAULT_AUTOSAVE, DEFAULT_BATCH_SIZE, DEFAULT_DENOISE_REF,
     DEFAULT_EXPORT_FORMAT, DEFAULT_LOUDNORM, DEFAULT_MAX_TOKENS,
-    DEFAULT_MP3_BITRATE, DEFAULT_REPETITION_PENALTY, DEFAULT_STREAM_PLAYBACK,
-    DEFAULT_TEMPERATURE,
+    DEFAULT_MP3_BITRATE, DEFAULT_REPETITION_PENALTY, DEFAULT_TEMPERATURE,
     DEFAULT_TIMEOUT, DEFAULT_TOP_K, DEFAULT_TOP_P, DEFAULT_TRIM_SILENCE,
     ENABLE_JIT_COMPILE, HISTORY_DIR, LANGUAGES, MAX_BATCH_SIZE, MIN_BATCH_SIZE,
     OUTPUT_DIR, VOICE_LIBRARY_DIR, YT_CACHE_DIR,
@@ -154,11 +153,6 @@ def build(ctx):
                     value=DEFAULT_AUTOSAVE,
                     label="Auto-save generated audio",
                 )
-                set_stream_playback = gr.Checkbox(
-                    value=DEFAULT_STREAM_PLAYBACK,
-                    label=S.STREAM_PLAYBACK_LABEL,
-                    info=S.STREAM_PLAYBACK_INFO,
-                )
                 gr.Markdown("### Export Format")
                 set_export_format = gr.Radio(
                     ["wav", "mp3", "ogg"],
@@ -213,7 +207,6 @@ def build(ctx):
         set_max_tokens=set_max_tokens, set_timeout=set_timeout,
         set_batch_size=set_batch_size, set_reset=set_reset,
         set_output_dir=set_output_dir, set_autosave=set_autosave,
-        set_stream_playback=set_stream_playback,
         set_export_format=set_export_format, set_mp3_bitrate=set_mp3_bitrate,
         set_loudnorm=set_loudnorm, set_trim_silence=set_trim_silence,
         set_yt_cache_btn=set_yt_cache_btn, set_yt_cache_status=set_yt_cache_status,
@@ -280,7 +273,7 @@ def wire(ctx, ui):
     def apply_settings(
         model_size, quantization,
         temperature, top_k, top_p, repetition_penalty, max_tokens, timeout,
-        output_dir, autosave, stream_playback, jit_compile, default_language,
+        output_dir, autosave, jit_compile, default_language,
         export_format, mp3_bitrate, loudnorm, trim_silence, denoise_ref,
         batch_size,
     ):
@@ -305,7 +298,6 @@ def wire(ctx, ui):
         s.timeout = int(timeout)
         s.output_dir = output_dir.strip() or OUTPUT_DIR
         s.autosave = autosave
-        s.stream_playback = stream_playback
         s.export_format = export_format
         s.mp3_bitrate = int(mp3_bitrate)
         s.loudnorm = loudnorm
@@ -355,8 +347,7 @@ def wire(ctx, ui):
             t.set_size, t.set_quant,
             t.set_temperature, t.set_top_k, t.set_top_p, t.set_rep_penalty,
             t.set_max_tokens, t.set_timeout,
-            t.set_output_dir, t.set_autosave, t.set_stream_playback,
-            t.set_jit, t.set_default_language,
+            t.set_output_dir, t.set_autosave, t.set_jit, t.set_default_language,
             t.set_export_format, t.set_mp3_bitrate, t.set_loudnorm, t.set_trim_silence,
             t.set_denoise_ref,
             t.set_batch_size,

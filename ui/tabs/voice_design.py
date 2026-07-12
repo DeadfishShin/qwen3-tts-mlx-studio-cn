@@ -46,7 +46,7 @@ def build(ctx):
         vd_batch_generate=batch.batch_generate, vd_batch_table=batch.batch_table,
         vd_batch_audio=batch.batch_audio, vd_batch_save=batch.batch_save,
         vd_batch_status=batch.batch_status,
-        vd_audio=out.audio, vd_result=out.result_state, vd_stop=out.stop,
+        vd_audio=out.audio, vd_stop=out.stop,
         vd_save=out.save, vd_save_status=out.save_status,
     )
 
@@ -96,11 +96,11 @@ def wire(ctx, ui):
     wire_run_lifecycle(
         t.vd_generate, t.vd_stop, on_generate,
         inputs=[t.vd_text, t.vd_language, t.vd_instruct],
-        outputs=[t.vd_audio, t.vd_result, ui.status],
+        outputs=[t.vd_audio, ui.status],
     )
     t.vd_save.click(
         fn=lambda audio: save_audio(ctx, audio, "design"),
-        inputs=[t.vd_result],
+        inputs=[t.vd_audio],
         outputs=[t.vd_save_status],
     )
     wire_run_lifecycle(
@@ -117,6 +117,6 @@ def wire(ctx, ui):
     )
     t.vd_lib_save.click(
         fn=save_and_refresh,
-        inputs=[t.vd_result, t.vd_lib_name, t.vd_language, t.vd_instruct, t.vd_text],
+        inputs=[t.vd_audio, t.vd_lib_name, t.vd_language, t.vd_instruct, t.vd_text],
         outputs=[t.vd_lib_status, ui.vc.vc_library_voice],
     )
