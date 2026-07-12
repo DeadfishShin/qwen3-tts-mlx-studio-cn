@@ -22,11 +22,11 @@ If you don't have Homebrew yet, open Terminal and paste:
 
 **Voice Design** — Describe a voice in plain language and the model creates it. Designed voices can be saved to the Voice Library. Supports batch generation.
 
-**Voice Cloning** — Clone a voice from a short reference audio clip (3-30 seconds). Provide the clip and an exact transcript of what was spoken. A "Transcribe Reference" button can auto-fill the transcript using the built-in ASR model. Supports batch generation.
+**Voice Cloning** — Clone a voice from a short reference audio clip (3-30 seconds). Provide the clip and an exact transcript of what was spoken. A "Transcribe Reference" button can auto-fill the transcript using the built-in ASR model. Reference clips are auto-trimmed of leading/trailing silence (Silero VAD, toggleable) and can optionally be denoised. Batch generation runs as true batched inference sharing the reference.
 
 **YT Voice Clone** — Clone a voice directly from a YouTube video. Paste a URL, select a timestamp range, and the transcript auto-fills from subtitles. A "Transcribe Clip" button is available when subtitles are missing or inaccurate. Clips are cached in `.yt_cache/`.
 
-**Script Mode** — Write multi-speaker scripts with `SPEAKER: Dialogue` formatting and assign a different voice to each speaker. Lines are batched by model type to minimise swaps, then stitched together with configurable silence gaps.
+**Script Mode** — Write multi-speaker scripts with `SPEAKER: Dialogue` formatting and assign a different voice to each speaker. Lines are batched by model type to minimise swaps (cloned speakers batch their lines against a shared reference), then stitched together with configurable silence gaps.
 
 **Transcription** — Transcribe audio files locally using the Qwen3-ASR model. Upload a file or record with your microphone, pick a language (or leave it on Auto), and get a text transcript. Supports up to ~20 minutes of audio. Transcriptions can be saved as `.txt` files.
 
@@ -34,7 +34,7 @@ If you don't have Homebrew yet, open Terminal and paste:
 
 **History** — Every generation is logged with mode, language, text, and duration. Replay audio, save files, or view original parameters.
 
-**Settings** — Model size and quantization, generation parameters (temperature, top-k, top-p, repetition penalty, max tokens, timeout), batch size (segments processed in parallel for Custom Voice & Voice Design batch/script modes), output directory, auto-save toggle, export format (WAV/MP3/OGG) with MP3 bitrate selector, post-processing (EBU R128 loudness normalization, silence trimming, reference audio denoising via DeepFilterNet), JIT compilation toggle, ASR model management, YT cache management, and model cache management (view/delete downloaded models).
+**Settings** — Model size and quantization, generation parameters (temperature, top-k, top-p, repetition penalty, max tokens, timeout), batch size (segments processed in parallel in batch and script modes, including voice cloning), output directory, auto-save toggle, export format (WAV/MP3/OGG) with MP3 bitrate selector, post-processing (EBU R128 loudness normalization, silence trimming, reference audio denoising via DeepFilterNet), JIT compilation toggle, ASR model management, YT cache management, and model cache management (view/delete downloaded models).
 
 ## Setup
 
@@ -124,7 +124,7 @@ Audio is generated at 24 kHz mono and saved to `./outputs/` by default. Supporte
 
 ## Supported Languages
 
-English, Chinese, Japanese, Korean, German, French, Russian, Portuguese, Spanish, Italian
+Auto-detect (default), or explicitly: English, Chinese, Japanese, Korean, German, French, Russian, Portuguese, Spanish, Italian
 
 ## Project Layout
 
