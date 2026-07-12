@@ -225,7 +225,7 @@ class ModeSpec:
     save_prefix: str
     validate: Callable              # (ctx, req) -> error string | None
     prepare: Callable               # (ctx, req) -> (req | None, error string | None)
-    call_single: Callable           # (ctx, req, **gen_kwargs) -> (sr, audio)
+    call_stream: Callable           # (ctx, req, **gen_kwargs) -> iterator of (sr, chunk)
     history_kwargs: Callable        # (req) -> dict of extra history.add fields
     status_extras: Callable         # (ctx) -> str appended to success status
     batch_prepare: Callable         # (ctx, req) -> (req | None, (table_rows, error) | None)
@@ -238,8 +238,9 @@ MODES = {
         model_type="custom_voice", save_prefix="custom",
         validate=_validate_common,
         prepare=_no_prepare,
-        call_single=lambda ctx, req, **kw: ctx.engine.generate_custom_voice(
-            req.text, req.speaker, api_language(req.language), req.instruct, **kw),
+        call_stream=lambda ctx, req, **kw: ctx.engine.stream_generate_custom_voice(
+            req.text, req.speaker, api_language(req.language), req.instruct,
+            streaming_interval=STREAMING_INTERVAL_S, **kw),
         history_kwargs=lambda req: dict(
             speaker=req.speaker,
             voice_params=req.instruct if req.instruct else ""),
@@ -254,8 +255,9 @@ MODES = {
         model_type="voice_design", save_prefix="design",
         validate=_validate_design,
         prepare=_no_prepare,
-        call_single=lambda ctx, req, **kw: ctx.engine.generate_voice_design(
-            req.text, api_language(req.language), req.instruct, **kw),
+        call_stream=lambda ctx, req, **kw: ctx.engine.stream_generate_voice_design(
+            req.text, api_language(req.language), req.instruct,
+            streaming_interval=STREAMING_INTERVAL_S, **kw),
         history_kwargs=lambda req: dict(voice_params=req.instruct),
         status_extras=_no_extras,
         batch_prepare=_batch_prepare_design,
@@ -268,9 +270,10 @@ MODES = {
         model_type="base", save_prefix="clone",
         validate=_validate_common,
         prepare=_prepare_clone,
-        call_single=lambda ctx, req, **kw: ctx.engine.generate_voice_clone(
+        call_stream=lambda ctx, req, **kw: ctx.engine.stream_generate_voice_clone(
             req.text, req.ref_audio, req.ref_text, api_language(req.language),
-            denoise_ref=ctx.settings.denoise_ref, trim_ref=req.trim_ref, **kw),
+            denoise_ref=ctx.settings.denoise_ref, trim_ref=req.trim_ref,
+            streaming_interval=STREAMING_INTERVAL_S, **kw),
         history_kwargs=lambda req: dict(
             voice_params=f"ref: {_clone_voice_info(req)}"),
         status_extras=_clone_extras,
@@ -285,44 +288,78 @@ MODES = {
 
 
 def run_single(ctx, req):
-    """Shared single-generation pipeline. Yields (audio_update, status_text)."""
+    """Shared single-generation pipeline.
+
+    Yields (audio_out, result_state, status). audio_out feeds a streaming
+    gr.Audio (per-chunk tuples while generating); result_state receives the
+    authoritative full waveform for Save/history — the streamed file is
+    playback UX only (Gradio normalizes each chunk independently). Cancel
+    and timeout are cooperative, checked between chunks.
+    """
     spec = MODES[req.mode]
     err = spec.validate(ctx, req)
     if err:
-        yield None, err
+        yield gr.skip(), gr.skip(), err
         return
     req, err = spec.prepare(ctx, req)
     if err:
-        yield None, err
+        yield gr.skip(), gr.skip(), err
         return
     msg = loading_status(ctx, spec.model_type)
     if msg:
-        yield None, msg
+        yield gr.skip(), gr.skip(), msg
+
+    ctx.cancel_event.clear()
+    sr, parts = None, []
+    start = time.monotonic()
+    first_chunk_at = None
+    stopped = timed_out = False
+    stream = spec.call_stream(ctx, req, **ctx.settings.gen_kwargs())
     try:
-        start = time.time()
-        sr, audio = generate_with_timeout(
-            spec.call_single, ctx, req,
-            timeout_seconds=ctx.settings.timeout,
-            **ctx.settings.gen_kwargs(),
-        )
-        elapsed = time.time() - start
-        result = (sr, audio)
-        ctx.history.add(mode=req.mode, text=req.text, language=req.language,
-                        audio=result, **spec.history_kwargs(req))
-        save_msg = ""
-        if ctx.settings.autosave:
-            save_msg = " | " + save_audio(ctx, result, spec.save_prefix)
-        yield (
-            gr.update(value=result),
-            f"Generated in {elapsed:.1f}s | Model: "
-            f"{ctx.engine.get_repo_id(spec.model_type)}{spec.status_extras(ctx)}{save_msg}",
-        )
-    except GenerationTimeout as e:
-        gr.Warning(str(e))
-        yield None, str(e)
+        for csr, chunk in stream:
+            sr = csr
+            parts.append(chunk)
+            now = time.monotonic()
+            if first_chunk_at is None:
+                first_chunk_at = now
+            secs = sum(len(p) for p in parts) / sr
+            audio_out = (csr, chunk) if ctx.settings.stream_playback else gr.skip()
+            yield audio_out, gr.skip(), S.GENERATING_STATUS.format(secs=secs)
+            if ctx.cancel_event.is_set():
+                stopped = True
+                break
+            if now - first_chunk_at > ctx.settings.timeout:
+                timed_out = True
+                break
     except Exception as e:
         gr.Warning(f"Generation failed: {e}")
-        yield None, f"Error: {e}"
+        yield gr.skip(), gr.skip(), f"Error: {e}"
+        return
+    finally:
+        stream.close()
+
+    if not parts:
+        yield gr.skip(), gr.skip(), "No audio produced"
+        return
+    result = (sr, np.concatenate(parts))
+    secs = len(result[1]) / sr
+    final_audio = result if not ctx.settings.stream_playback else gr.skip()
+    if stopped or timed_out:
+        # Partial takes are for immediate listening/manual save only:
+        # no history entry, no autosave.
+        status = (S.TIMED_OUT_KEPT.format(timeout=ctx.settings.timeout, secs=secs)
+                  if timed_out else S.STOPPED_KEPT.format(secs=secs))
+        yield final_audio, result, status
+        return
+    elapsed = time.monotonic() - start
+    ctx.history.add(mode=req.mode, text=req.text, language=req.language,
+                    audio=result, **spec.history_kwargs(req))
+    save_msg = ""
+    if ctx.settings.autosave:
+        save_msg = " | " + save_audio(ctx, result, spec.save_prefix)
+    yield final_audio, result, (
+        f"Generated in {elapsed:.1f}s | Model: "
+        f"{ctx.engine.get_repo_id(spec.model_type)}{spec.status_extras(ctx)}{save_msg}")
 
 
 def _segment_preview(seg):
