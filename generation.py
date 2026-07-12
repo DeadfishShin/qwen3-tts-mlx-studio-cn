@@ -1,9 +1,8 @@
-"""Shared generation pipeline: validation, timeout, engine calls, history, autosave.
+"""Shared generation pipeline: validation, cancel/timeout, engine calls, history, autosave.
 
 All tab handlers route generation through this module; it is the only caller
 of the engine's generate methods.
 """
-import concurrent.futures
 import os
 import time
 from dataclasses import dataclass
@@ -11,24 +10,53 @@ from datetime import datetime
 from typing import Callable, Optional
 
 import gradio as gr
+import numpy as np
 
 from audio_utils import concatenate_audio, export_audio, split_text
-from config import LANGUAGE_AUTO, MAX_BATCH_SEGMENTS
+from config import LANGUAGE_AUTO, MAX_BATCH_SEGMENTS, STREAMING_INTERVAL_S
+from ui import strings as S
 
 
 class GenerationTimeout(Exception):
     pass
 
 
-def generate_with_timeout(func, *func_args, timeout_seconds=120, **func_kwargs):
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(func, *func_args, **func_kwargs)
-        try:
-            return future.result(timeout=timeout_seconds)
-        except concurrent.futures.TimeoutError:
-            raise GenerationTimeout(
-                "Generation timed out — try shorter text or lower max_new_tokens"
-            )
+class GenerationCancelled(Exception):
+    pass
+
+
+def stream_to_audio(ctx, stream):
+    """Drain an engine streaming generator into one (sr, audio) array.
+
+    Cancel and timeout are checked between chunks — abandoning the generator
+    is the only way to interrupt generation (the old thread-pool timeout could
+    not). The timeout clock starts at the first chunk so a first-run model
+    download doesn't count against it. Does NOT clear the cancel event; run
+    boundaries own that.
+    """
+    sr, parts, first_chunk_at = None, [], None
+    try:
+        for csr, chunk in stream:
+            sr = csr
+            parts.append(chunk)
+            now = time.monotonic()
+            if first_chunk_at is None:
+                first_chunk_at = now
+            if ctx.cancel_event.is_set():
+                raise GenerationCancelled()
+            if now - first_chunk_at > ctx.settings.timeout:
+                raise GenerationTimeout(S.TIMEOUT_MSG)
+    finally:
+        stream.close()
+    if not parts:
+        raise RuntimeError("no audio produced")
+    return sr, np.concatenate(parts)
+
+
+def generate_once(ctx, req):
+    """Blocking single generation via the streaming path (cancel/timeout aware)."""
+    spec = MODES[req.mode]
+    return stream_to_audio(ctx, spec.call_stream(ctx, req, **ctx.settings.gen_kwargs()))
 
 
 def save_audio(ctx, audio_tuple, prefix="output"):
