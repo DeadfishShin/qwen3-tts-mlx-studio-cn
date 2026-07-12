@@ -25,8 +25,8 @@ def test_engine_gets_auto_history_keeps_label(fake_engine, fake_history, tmp_pat
                      yt=None, settings=s)
     out = list(run_single(ctx, GenRequest(mode="custom_voice", text="hello",
                                           language="Auto-detect", speaker="ryan")))
-    assert out[-1][1].startswith("Generated in ")
-    # engine received the API value
-    assert fake_engine.calls[-1] == ("generate_custom_voice", "hello", "auto")
+    assert out[-1][2].startswith("Generated in ")
+    # engine received the API value (via the streaming path)
+    assert fake_engine.calls[-1] == ("stream_generate_custom_voice", "hello", "auto")
     # history records what the user chose
     assert fake_history.entries[0]["language"] == "Auto-detect"

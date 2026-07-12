@@ -367,53 +367,70 @@ def _segment_preview(seg):
 
 
 def run_batch(ctx, req, split_mode, silence_ms, progress):
-    """Shared batch pipeline. Returns (audio_update, table_rows, status_msg)."""
+    """Shared batch pipeline. Generator yielding (audio_update, table_rows, status).
+
+    Batched engine calls stay blocking (continuous-batching throughput);
+    cancel is checked between batch calls and between fallback retries.
+    Fallback retries go through stream_to_audio, so they are cancel- and
+    timeout-aware per chunk. On cancel, completed segments are combined but
+    NOT recorded to history.
+    """
     from dataclasses import replace
 
     spec = MODES[req.mode]
     req, err_pack = spec.batch_prepare(ctx, req)
     if err_pack:
         rows, msg = err_pack
-        return None, rows, msg
+        yield None, rows, msg
+        return
     segments = split_text(req.text, split_mode)
     if not segments:
         gr.Warning("No text segments found.")
-        return None, [["(empty)", "", ""]], "No segments"
+        yield None, [["(empty)", "", ""]], "No segments"
+        return
     if len(segments) > MAX_BATCH_SEGMENTS:
         gr.Warning(f"Too many segments ({len(segments)}). Max is {MAX_BATCH_SEGMENTS}.")
-        return None, [["(error)", "", ""]], f"Too many segments (max {MAX_BATCH_SEGMENTS})"
+        yield None, [["(error)", "", ""]], f"Too many segments (max {MAX_BATCH_SEGMENTS})"
+        return
 
+    ctx.cancel_event.clear()
     batch_size = ctx.settings.batch_size
     audio_parts = []
     table_rows = []
     succeeded, failed = 0, 0
+    cancelled = False
     total = len(segments)
 
     def run_one(idx, seg):
-        nonlocal succeeded, failed
+        nonlocal succeeded, failed, cancelled
         preview = _segment_preview(seg)
         try:
-            sr, audio = generate_with_timeout(
-                spec.call_single, ctx, replace(req, text=seg),
-                timeout_seconds=ctx.settings.timeout,
-                **ctx.settings.gen_kwargs(),
-            )
+            sr, audio = stream_to_audio(
+                ctx, spec.call_stream(ctx, replace(req, text=seg),
+                                      **ctx.settings.gen_kwargs()))
             audio_parts.append((sr, audio))
             table_rows.append([str(idx + 1), preview, f"{len(audio) / sr:.1f}s"])
             succeeded += 1
+        except GenerationCancelled:
+            table_rows.append([str(idx + 1), preview, "Stopped"])
+            cancelled = True
         except Exception as e:
             table_rows.append([str(idx + 1), preview, f"Failed: {e}"])
             failed += 1
 
+    def progress_status():
+        secs = sum(len(a) / s for s, a in audio_parts)
+        return S.BATCH_SEGMENT_PROGRESS.format(
+            done=succeeded + failed, total=total, secs=secs)
+
     for batch_start in range(0, total, batch_size):
+        if cancelled or ctx.cancel_event.is_set():
+            cancelled = True
+            break
         batch_segs = segments[batch_start:batch_start + batch_size]
         batch_indices = list(range(batch_start, batch_start + len(batch_segs)))
         try:
-            results = generate_with_timeout(
-                spec.call_batch, ctx, batch_segs, req,
-                timeout_seconds=ctx.settings.timeout,
-                **ctx.settings.gen_kwargs(),
-            )
+            results = spec.call_batch(ctx, batch_segs, req, **ctx.settings.gen_kwargs())
             for j, (sr, audio) in enumerate(results):
                 idx = batch_indices[j]
                 audio_parts.append((sr, audio))
@@ -421,16 +438,26 @@ def run_batch(ctx, req, split_mode, silence_ms, progress):
                     [str(idx + 1), _segment_preview(batch_segs[j]), f"{len(audio) / sr:.1f}s"])
                 succeeded += 1
                 progress((batch_start + j + 1) / total, desc="Generating segments")
+            yield gr.skip(), list(table_rows), progress_status()
         except Exception:
             # Batch failed — retry each segment individually
             for j, seg in enumerate(batch_segs):
+                if cancelled or ctx.cancel_event.is_set():
+                    cancelled = True
+                    break
                 run_one(batch_indices[j], seg)
                 progress((batch_start + j + 1) / total, desc="Generating segments")
+                yield gr.skip(), list(table_rows), progress_status()
 
     if not audio_parts:
-        return None, table_rows, "All segments failed"
+        yield None, table_rows, ("Stopped" if cancelled else "All segments failed")
+        return
 
     combined = concatenate_audio(audio_parts, silence_ms=int(silence_ms))
+    if cancelled:
+        yield gr.update(value=combined), table_rows, S.BATCH_STOPPED.format(
+            done=succeeded, total=total)
+        return
     ctx.history.add(
         mode=req.mode, text=f"[Batch: {succeeded} segments]",
         language=req.language, audio=combined,
@@ -440,4 +467,4 @@ def run_batch(ctx, req, split_mode, silence_ms, progress):
     if failed:
         status_msg += f" ({failed} failed)"
     status_msg += spec.status_extras(ctx)
-    return gr.update(value=combined), table_rows, status_msg
+    yield gr.update(value=combined), table_rows, status_msg
