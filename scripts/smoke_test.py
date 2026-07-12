@@ -1,12 +1,14 @@
 """Engine-level smoke test with real models. Slow (~5 min full run).
 
 Usage: .venv/bin/python scripts/smoke_test.py [--fast]
-Covers: single generation x3 modes, batch x2 modes, ASR transcription.
-Voice-clone reference audio is self-generated via custom voice.
+Covers: single generation x3 modes, batch x2 modes, streaming chunks,
+cancel of a runaway generation mid-stream, ASR transcription (batch +
+streaming). Voice-clone reference audio is self-generated via custom voice.
 """
 import argparse
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -42,6 +44,14 @@ def assert_audio(result, min_s=0.3):
 
 ref_wav = None
 
+# EOS-hostile stress text (scientific notation + acronym/statistics salad):
+# reliably runs away to max_tokens — the Stage 3 cancel regression case.
+STRESS_TEXT = (
+    "Results ranged from 2.4e-4 to 3.7e-6 with AUC 0.91, RMSE 3.2e-2, MAPE 14.8%, "
+    "CI 95%, p<0.001, via SGD, ADAM, RMSProp, L-BFGS, HMM, CRF, LSTM, GRU, CNN, RNN, "
+    "GAN, VAE, T5, BERT, GPT, at 1.2e9 FLOPs, 3.4e-5 lr, 2.1e-3 wd, 88.8% acc."
+)
+
 
 def single_custom():
     global ref_wav
@@ -61,6 +71,43 @@ def batch_custom():
     assert len(rs) == 3
     for r in rs:
         assert_audio(r, min_s=0.2)
+
+
+def stream_chunks():
+    chunks = list(engine.stream_generate_custom_voice(
+        "Streaming smoke test sentence, spoken at a steady, unhurried pace "
+        "so that several chunks arrive.", "ryan", "English", streaming_interval=1.0))
+    assert len(chunks) >= 2, f"expected >=2 chunks, got {len(chunks)}"
+    sr = chunks[0][0]
+    total = sum(len(c) for _, c in chunks) / sr
+    assert total > 0.5, f"suspicious streamed audio: {total:.2f}s"
+
+
+def cancel_runaway():
+    t0 = time.time()
+    stream = engine.stream_generate_custom_voice(
+        STRESS_TEXT, "ryan", "English", streaming_interval=1.0)
+    got = 0
+    for _sr, _chunk in stream:
+        got += 1
+        if got >= 2:
+            break
+    stream.close()                      # cooperative cancel = abandon the generator
+    elapsed = time.time() - t0
+    assert got >= 2, "runaway produced no chunks"
+    assert elapsed < 30, f"cancel took {elapsed:.0f}s — should be seconds, not minutes"
+    # engine must be immediately usable and lock-free
+    r = engine.generate_custom_voice(
+        "Recovery check after cancelling the runaway.", "ryan", "English")
+    assert_audio(r)
+
+
+def stream_asr():
+    assert ref_wav is not None
+    parts = list(engine.stream_transcribe(str(ref_wav), language="auto"))
+    text = "".join(parts)
+    assert len(parts) >= 2, f"expected streaming deltas, got {len(parts)}"
+    assert len(text.split()) >= 4, f"thin streamed transcript: {text!r}"
 
 
 def single_design():
@@ -127,6 +174,8 @@ def asr():
 
 check("single custom_voice", single_custom)
 check("batch custom_voice (canary)", batch_custom)
+check("streaming chunks arrive", stream_chunks)
+check("cancel runaway mid-generation", cancel_runaway)
 if not args.fast:
     check("single voice_design", single_design)
     check("batch voice_design", batch_design)
@@ -135,6 +184,7 @@ check("batch voice_clone shared-ref (canary)", batch_clone)
 check("vad trim (real model)", vad_trim_real)
 if not args.fast:
     check("asr transcribe", asr)
+    check("streaming asr", stream_asr)
 
 def cache_returned():
     import mlx.core as mx
