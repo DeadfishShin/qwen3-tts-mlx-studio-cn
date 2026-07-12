@@ -62,6 +62,10 @@ DEFAULT_REPETITION_PENALTY = 1.05
 DEFAULT_MAX_TOKENS = 4096
 DEFAULT_TIMEOUT = 120
 
+# Streaming playback (Stage 3)
+DEFAULT_STREAM_PLAYBACK = True   # stream chunks to the player during generation
+STREAMING_INTERVAL_S = 1.0       # seconds of audio per streamed chunk (~1 s to first sound)
+
 # Output defaults
 DEFAULT_AUTOSAVE = False
 DEFAULT_EXPORT_FORMAT = "wav"    # "wav", "mp3", "ogg"

@@ -82,6 +82,24 @@ VC_LIB_NAME_PLACEHOLDER = "my_clone"
 # --- Transcription tab ---
 TAB_TRANSCRIPTION = "Transcription"
 
+# --- Streaming / cancel (Stage 3) ---
+STOP = "Stop"
+STOPPING = "Stopping…"
+GENERATING_STATUS = "Generating… {secs:.1f}s"
+STOPPED_KEPT = "Stopped — kept {secs:.1f}s of partial audio"
+TIMED_OUT_KEPT = "Timed out after {timeout}s — kept {secs:.1f}s of partial audio"
+TIMEOUT_MSG = "Generation timed out — lower Max Tokens or shorten the text"
+BATCH_SEGMENT_PROGRESS = "Segment {done}/{total} · {secs:.1f}s audio"
+BATCH_STOPPED = "Stopped — completed {done}/{total} segments"
+SCRIPT_LINE_PROGRESS = "Line {done}/{total} · {secs:.1f}s audio"
+SCRIPT_STOPPED = "Stopped — completed {done}/{total} lines"
+ASR_LOADING = "Loading ASR model..."
+TRANSCRIBING = "Transcribing… {words} words"
+TRANSCRIBE_STOPPED = "Stopped — partial transcript kept"
+STREAM_PLAYBACK_LABEL = "Play audio while it generates"
+STREAM_PLAYBACK_INFO = "Streams sound to the player as it is generated (single generations)"
+TIMEOUT_SLIDER_INFO = "Auto-stops a run after this many seconds, keeping partial audio"
+
 # --- Table empty states ---
 NO_VOICES = "*No voices saved.*"
 NO_HISTORY = "*No history entries.*"

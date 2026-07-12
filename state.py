@@ -1,10 +1,12 @@
+import threading
 from dataclasses import dataclass, field
 from typing import Any, List
 
 from config import (
     DEFAULT_AUTOSAVE, DEFAULT_BATCH_SIZE, DEFAULT_DENOISE_REF,
     DEFAULT_EXPORT_FORMAT, DEFAULT_LOUDNORM, DEFAULT_MAX_TOKENS,
-    DEFAULT_MP3_BITRATE, DEFAULT_REPETITION_PENALTY, DEFAULT_TEMPERATURE,
+    DEFAULT_MP3_BITRATE, DEFAULT_REPETITION_PENALTY, DEFAULT_STREAM_PLAYBACK,
+    DEFAULT_TEMPERATURE,
     DEFAULT_TIMEOUT, DEFAULT_TOP_K, DEFAULT_TOP_P, DEFAULT_TRIM_SILENCE,
     LANGUAGE_AUTO,
     OUTPUT_DIR,
@@ -29,6 +31,7 @@ class AppSettings:
     denoise_ref: bool = DEFAULT_DENOISE_REF
     batch_size: int = DEFAULT_BATCH_SIZE
     default_language: str = LANGUAGE_AUTO
+    stream_playback: bool = DEFAULT_STREAM_PLAYBACK
 
     def gen_kwargs(self) -> dict:
         """Sampler kwargs passed to every engine generate call."""
@@ -50,3 +53,6 @@ class AppContext:
     yt: Any
     settings: AppSettings
     startup_warnings: List[str] = field(default_factory=list)
+    # One shared cooperative-cancel flag: the engine lock serializes runs, so a
+    # single event is enough. Runners clear it at start; Stop buttons set it.
+    cancel_event: threading.Event = field(default_factory=threading.Event)
