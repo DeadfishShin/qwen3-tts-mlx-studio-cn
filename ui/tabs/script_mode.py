@@ -5,9 +5,12 @@ import gradio as gr
 
 from config import DEFAULT_SCRIPT_SILENCE_MS, DEFAULT_SPEAKERS, LANGUAGE_AUTO, LANGUAGES, MAX_SCRIPT_SPEAKERS
 from audio_utils import concatenate_audio
-from generation import api_language, generate_with_timeout, save_audio
+from generation import (
+    GenerationCancelled, GenRequest, api_language, generate_once, save_audio,
+)
 from script_parser import group_by_model_type, parse_script
-from ui.components import format_table_md, voice_choices
+from ui import strings as S
+from ui.components import format_table_md, voice_choices, wire_run_lifecycle, wire_stop
 
 
 def build(ctx):
@@ -91,6 +94,7 @@ def build(ctx):
 
                 with gr.Row():
                     sm_generate_btn = gr.Button("Generate Script", variant="primary")
+                    sm_stop_btn = gr.Button(S.STOP, variant="stop", visible=False)
                     sm_save_btn = gr.Button("Save Combined Audio")
                 with gr.Accordion("Per-line breakdown", open=False):
                     sm_table = gr.Markdown(value="*Results will appear after generation.*")
@@ -107,19 +111,32 @@ def build(ctx):
         sm_speaker_instructs=sm_speaker_instructs,
         sm_speaker_languages=sm_speaker_languages,
         sm_speaker_lib_voices=sm_speaker_lib_voices,
-        sm_generate_btn=sm_generate_btn, sm_save_btn=sm_save_btn,
+        sm_generate_btn=sm_generate_btn, sm_stop_btn=sm_stop_btn,
+        sm_save_btn=sm_save_btn,
         sm_table=sm_table, sm_audio=sm_audio, sm_status=sm_status,
     )
+
+
+def _script_secs(audio_by_line_number):
+    """Total seconds of audio generated so far across the whole script."""
+    return sum(len(a) / s for (s, a) in
+               [r for r in audio_by_line_number.values() if r is not None])
 
 
 def _generate_clone_lines_batched(ctx, lines, assignments_state, audio_by_line_number,
                                   done, total_lines, progress):
     """Generate Voice Clone script lines, batching lines that share a library voice.
 
-    Script clone lines always use library refs as saved (no trim). Returns
-    (succeeded_delta, failed_delta, done).
+    Script clone lines always use library refs as saved (no trim). Generator:
+    yields a status string after each completed chunk/line; returns
+    (succeeded_delta, failed_delta, done, cancelled).
     """
     succeeded = failed = 0
+    cancelled = False
+
+    def line_status():
+        return S.SCRIPT_LINE_PROGRESS.format(
+            done=done, total=total_lines, secs=_script_secs(audio_by_line_number))
 
     def fail_line(line):
         nonlocal failed, done
@@ -129,19 +146,17 @@ def _generate_clone_lines_batched(ctx, lines, assignments_state, audio_by_line_n
         progress(done / total_lines)
 
     def run_line_single(line, ref_audio_path, ref_text, lang):
-        nonlocal succeeded, done
+        nonlocal succeeded, done, cancelled
         try:
-            sr, audio = generate_with_timeout(
-                ctx.engine.generate_voice_clone,
-                line.text, ref_audio_path, ref_text, lang,
-                denoise_ref=ctx.settings.denoise_ref,
-                timeout_seconds=ctx.settings.timeout,
-                **ctx.settings.gen_kwargs(),
-            )
+            sr, audio = generate_once(ctx, GenRequest(
+                mode="voice_clone", text=line.text, language=lang,
+                ref_audio=ref_audio_path, ref_text=ref_text, trim_ref=False))
             audio_by_line_number[line.line_number] = (sr, audio)
             succeeded += 1
             done += 1
             progress(done / total_lines, desc="Generating Voice Clone lines...")
+        except GenerationCancelled:
+            cancelled = True
         except Exception:
             fail_line(line)
 
@@ -154,10 +169,13 @@ def _generate_clone_lines_batched(ctx, lines, assignments_state, audio_by_line_n
 
     batch_size = ctx.settings.batch_size
     for (lib_voice, lang), group_lines in groups.items():
-        lang = api_language(lang)
+        if cancelled or ctx.cancel_event.is_set():
+            cancelled = True
+            break
         if not lib_voice or lib_voice == "None":
             for line in group_lines:
                 fail_line(line)
+            yield line_status()
             continue
         try:
             voice = ctx.library.load_voice(lib_voice)
@@ -166,17 +184,20 @@ def _generate_clone_lines_batched(ctx, lines, assignments_state, audio_by_line_n
         except FileNotFoundError:
             for line in group_lines:
                 fail_line(line)
+            yield line_status()
             continue
 
         if batch_size > 1 and len(group_lines) > 1:
             for chunk_start in range(0, len(group_lines), batch_size):
+                if cancelled or ctx.cancel_event.is_set():
+                    cancelled = True
+                    break
                 chunk = group_lines[chunk_start:chunk_start + batch_size]
                 try:
-                    results = generate_with_timeout(
-                        ctx.engine.batch_generate_voice_clone,
-                        [l.text for l in chunk], ref_audio_path, ref_text, lang,
+                    results = ctx.engine.batch_generate_voice_clone(
+                        [l.text for l in chunk], ref_audio_path, ref_text,
+                        api_language(lang),
                         denoise_ref=ctx.settings.denoise_ref,
-                        timeout_seconds=ctx.settings.timeout,
                         **ctx.settings.gen_kwargs(),
                     )
                     for j, (sr, audio) in enumerate(results):
@@ -187,32 +208,49 @@ def _generate_clone_lines_batched(ctx, lines, assignments_state, audio_by_line_n
                 except Exception:
                     # Batch failed — retry each line individually
                     for line in chunk:
+                        if cancelled or ctx.cancel_event.is_set():
+                            cancelled = True
+                            break
                         run_line_single(line, ref_audio_path, ref_text, lang)
+                yield line_status()
         else:
             for line in group_lines:
+                if cancelled or ctx.cancel_event.is_set():
+                    cancelled = True
+                    break
                 run_line_single(line, ref_audio_path, ref_text, lang)
+                yield line_status()
 
-    return succeeded, failed, done
+    return succeeded, failed, done, cancelled
 
 
 def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progress=gr.Progress()):
     """Generate audio for a parsed multi-speaker script.
+
+    Generator yielding (audio_update, table_md, status) with live per-line
+    progress. Cancel is checked between lines/batched calls; on Stop the
+    completed lines are combined but NOT recorded to history.
 
     assignments_state is a dict mapping speaker name to voice config:
       {speaker: {"mode": ..., "speaker": ..., "language": ..., "instruct": ..., "library_voice": ...}}
     """
     if not raw_text.strip():
         gr.Warning("Enter a script first.")
-        return None, "*Enter a script first.*", "Enter script first"
+        yield None, "*Enter a script first.*", "Enter script first"
+        return
 
     parsed = parse_script(raw_text)
     if parsed.errors:
         gr.Warning(parsed.errors[0])
-        return None, f"*{parsed.errors[0]}*", parsed.errors[0]
+        yield None, f"*{parsed.errors[0]}*", parsed.errors[0]
+        return
 
     if not assignments_state:
         gr.Warning("Parse the script and assign voices first.")
-        return None, "*Parse the script and assign voices first.*", "Parse script first"
+        yield None, "*Parse the script and assign voices first.*", "Parse script first"
+        return
+
+    ctx.cancel_event.clear()
 
     # Group lines by model type for efficient model swapping
     groups = group_by_model_type(parsed.lines, assignments_state)
@@ -229,20 +267,39 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
 
     total_lines = len(parsed.lines)
     done = 0
+    cancelled = False
+
+    def line_status():
+        return S.SCRIPT_LINE_PROGRESS.format(
+            done=done, total=total_lines, secs=_script_secs(audio_by_line_number))
 
     for model_type, lines in groups.items():
+        if cancelled or ctx.cancel_event.is_set():
+            cancelled = True
+            break
         label = model_type_labels.get(model_type, model_type)
         batch_size = ctx.settings.batch_size
 
         if model_type == "base":
-            s, f, done = _generate_clone_lines_batched(
+            inner = _generate_clone_lines_batched(
                 ctx, lines, assignments_state, audio_by_line_number,
                 done, total_lines, progress)
+            while True:
+                try:
+                    status = next(inner)
+                    yield gr.skip(), gr.skip(), status
+                except StopIteration as stop:
+                    s, f, done, was_cancelled = stop.value
+                    break
             succeeded += s
             failed += f
+            cancelled = cancelled or was_cancelled
         elif model_type in ("custom_voice", "voice_design") and batch_size > 1:
             # Batch generation for Custom Voice and Voice Design
             for batch_start in range(0, len(lines), batch_size):
+                if cancelled or ctx.cancel_event.is_set():
+                    cancelled = True
+                    break
                 batch_lines = lines[batch_start:batch_start + batch_size]
                 texts = [l.text for l in batch_lines]
 
@@ -257,10 +314,8 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
                             speakers.append(assignment.get("speaker", DEFAULT_SPEAKERS[0]))
                             instructs.append(assignment.get("instruct", ""))
 
-                        results = generate_with_timeout(
-                            ctx.engine.batch_generate_custom_voice,
+                        results = ctx.engine.batch_generate_custom_voice(
                             texts, speakers, lang, instructs,
-                            timeout_seconds=ctx.settings.timeout,
                             **ctx.settings.gen_kwargs(),
                         )
                     else:  # voice_design
@@ -271,10 +326,8 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
                             lang = api_language(assignment.get("language", "English"))
                             instructs.append(assignment.get("instruct", ""))
 
-                        results = generate_with_timeout(
-                            ctx.engine.batch_generate_voice_design,
+                        results = ctx.engine.batch_generate_voice_design(
                             texts, lang, instructs,
-                            timeout_seconds=ctx.settings.timeout,
                             **ctx.settings.gen_kwargs(),
                         )
 
@@ -287,73 +340,56 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
                 except Exception:
                     # Batch failed — retry each line individually
                     for line in batch_lines:
+                        if cancelled or ctx.cancel_event.is_set():
+                            cancelled = True
+                            break
                         assignment = assignments_state.get(line.speaker, {})
-                        lang = api_language(assignment.get("language", "English"))
                         try:
-                            if model_type == "custom_voice":
-                                sr, audio = generate_with_timeout(
-                                    ctx.engine.generate_custom_voice,
-                                    line.text,
-                                    assignment.get("speaker", DEFAULT_SPEAKERS[0]),
-                                    lang,
-                                    assignment.get("instruct", ""),
-                                    timeout_seconds=ctx.settings.timeout,
-                                    **ctx.settings.gen_kwargs(),
-                                )
-                            else:
-                                sr, audio = generate_with_timeout(
-                                    ctx.engine.generate_voice_design,
-                                    line.text,
-                                    lang,
-                                    assignment.get("instruct", ""),
-                                    timeout_seconds=ctx.settings.timeout,
-                                    **ctx.settings.gen_kwargs(),
-                                )
+                            sr, audio = generate_once(ctx, GenRequest(
+                                mode=model_type, text=line.text,
+                                language=assignment.get("language", "English"),
+                                speaker=assignment.get("speaker", DEFAULT_SPEAKERS[0]),
+                                instruct=assignment.get("instruct", "")))
                             audio_by_line_number[line.line_number] = (sr, audio)
                             succeeded += 1
+                        except GenerationCancelled:
+                            cancelled = True
+                            break
                         except Exception:
                             audio_by_line_number[line.line_number] = None
                             failed += 1
                         done += 1
                         progress(done / total_lines)
+                yield gr.skip(), gr.skip(), line_status()
         else:
             # Sequential generation (Custom Voice / Voice Design at batch_size == 1)
             for line in lines:
+                if cancelled or ctx.cancel_event.is_set():
+                    cancelled = True
+                    break
                 assignment = assignments_state.get(line.speaker, {})
                 mode = assignment.get("mode", "custom_voice")
-                lang = api_language(assignment.get("language", "English"))
 
                 try:
-                    if mode == "custom_voice":
-                        sr, audio = generate_with_timeout(
-                            ctx.engine.generate_custom_voice,
-                            line.text,
-                            assignment.get("speaker", DEFAULT_SPEAKERS[0]),
-                            lang,
-                            assignment.get("instruct", ""),
-                            timeout_seconds=ctx.settings.timeout,
-                            **ctx.settings.gen_kwargs(),
-                        )
-                    elif mode == "voice_design":
-                        sr, audio = generate_with_timeout(
-                            ctx.engine.generate_voice_design,
-                            line.text,
-                            lang,
-                            assignment.get("instruct", ""),
-                            timeout_seconds=ctx.settings.timeout,
-                            **ctx.settings.gen_kwargs(),
-                        )
-                    else:
+                    if mode not in ("custom_voice", "voice_design"):
                         raise ValueError(f"Unknown mode: {mode}")
-
+                    sr, audio = generate_once(ctx, GenRequest(
+                        mode=mode, text=line.text,
+                        language=assignment.get("language", "English"),
+                        speaker=assignment.get("speaker", DEFAULT_SPEAKERS[0]),
+                        instruct=assignment.get("instruct", "")))
                     audio_by_line_number[line.line_number] = (sr, audio)
                     succeeded += 1
+                except GenerationCancelled:
+                    cancelled = True
+                    break
                 except Exception:
                     audio_by_line_number[line.line_number] = None
                     failed += 1
 
                 done += 1
                 progress(done / total_lines)
+                yield gr.skip(), gr.skip(), line_status()
 
     # Reassemble in script order and build results table
     audio_segments = []
@@ -365,13 +401,26 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
             duration = len(audio) / sr
             audio_segments.append((sr, audio))
             table_rows.append([str(line.line_number), line.speaker, preview, f"{duration:.1f}s"])
-        else:
+        elif line.line_number in audio_by_line_number:
             table_rows.append([str(line.line_number), line.speaker, preview, "Failed"])
+        else:
+            # never attempted — only happens when the run was stopped
+            table_rows.append([str(line.line_number), line.speaker, preview,
+                               "Stopped" if cancelled else "Failed"])
+
+    table_md = format_table_md(["Line", "Speaker", "Text", "Status"], table_rows, "*No results.*")
 
     if not audio_segments:
-        return None, format_table_md(["Line", "Speaker", "Text", "Status"], table_rows, "*No results.*"), "All lines failed"
+        yield None, table_md, ("Stopped" if cancelled else "All lines failed")
+        return
 
     combined = concatenate_audio(audio_segments, silence_ms=int(silence_ms))
+    if cancelled:
+        # Partial script kept for listening/manual save; not recorded to history.
+        yield gr.update(value=combined), table_md, S.SCRIPT_STOPPED.format(
+            done=succeeded, total=total_lines)
+        return
+
     # Record to history
     speakers_used = ", ".join(parsed.speakers[:4])
     if len(parsed.speakers) > 4:
@@ -388,7 +437,7 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
         status_msg += f" ({failed} failed)"
     if ctx.settings.denoise_ref:
         status_msg += " | Noise reduction applied"
-    return gr.update(value=combined), format_table_md(["Line", "Speaker", "Text", "Status"], table_rows, "*No results.*"), status_msg
+    yield gr.update(value=combined), table_md, status_msg
 
 
 def wire(ctx, ui):
@@ -476,7 +525,7 @@ def wire(ctx, ui):
     def _generate_script_with_assignments(raw_text, assignments, silence_ms, *slot_values, progress=gr.Progress()):
         """Build fresh assignments from slot values, then generate."""
         fresh = _build_assignments_from_slots(assignments, raw_text, *slot_values)
-        return generate_script_handler(ctx, raw_text, fresh, silence_ms, progress)
+        yield from generate_script_handler(ctx, raw_text, fresh, silence_ms, progress)
 
     def _refresh_script_lib_voices():
         choices = voice_choices(ctx)
@@ -498,8 +547,9 @@ def wire(ctx, ui):
         inputs=[t.sm_script],
         outputs=[*t.sm_speaker_groups, t.sm_parse_status, t.sm_assignments],
     )
-    t.sm_generate_btn.click(
-        fn=_generate_script_with_assignments,
+    wire_stop(ctx, t.sm_stop_btn, t.sm_status)
+    wire_run_lifecycle(
+        t.sm_generate_btn, t.sm_stop_btn, _generate_script_with_assignments,
         inputs=[t.sm_script, t.sm_assignments, t.sm_silence, *all_slot_controls],
         outputs=[t.sm_audio, t.sm_table, t.sm_status],
         show_progress="full",
