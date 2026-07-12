@@ -15,6 +15,9 @@ MODEL_VARIANTS = {
 # ASR model (fixed — do not change size/quant)
 ASR_REPO_ID = "mlx-community/Qwen3-ASR-1.7B-8bit"
 
+# UI value for automatic language detection (engine receives "auto")
+LANGUAGE_AUTO = "Auto-detect"
+
 # Supported languages
 LANGUAGES = [
     "English", "Chinese", "Japanese", "Korean",
@@ -69,6 +72,9 @@ DEFAULT_DENOISE_REF = False     # DeepFilterNet ref audio denoising
 
 # DeepFilterNet model (8MB, cached after first download)
 DEEPFILTER_REPO = "mlx-community/DeepFilterNet-mlx"
+
+# Silero VAD model (~2MB) for trimming reference-clip silence
+VAD_REPO = "mlx-community/silero-vad"
 
 # JIT compilation — set False to disable if you hit issues
 ENABLE_JIT_COMPILE = True

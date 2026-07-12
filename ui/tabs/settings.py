@@ -7,6 +7,7 @@ import gradio as gr
 
 from audio_utils import unload_deepfilter
 from config import (
+    LANGUAGE_AUTO,
     DEFAULT_AUTOSAVE, DEFAULT_BATCH_SIZE, DEFAULT_DENOISE_REF,
     DEFAULT_EXPORT_FORMAT, DEFAULT_LOUDNORM, DEFAULT_MAX_TOKENS,
     DEFAULT_MP3_BITRATE, DEFAULT_REPETITION_PENALTY, DEFAULT_TEMPERATURE,
@@ -62,8 +63,8 @@ def build(ctx):
                 )
                 gr.Markdown("### Language")
                 set_default_language = gr.Dropdown(
-                    choices=LANGUAGES,
-                    value="English",
+                    choices=[LANGUAGE_AUTO] + LANGUAGES,
+                    value=LANGUAGE_AUTO,
                     label="Default Language",
                 )
                 set_jit = gr.Checkbox(
@@ -121,6 +122,7 @@ def build(ctx):
                 set_rep_penalty = gr.Slider(
                     1.0, 2.0, value=DEFAULT_REPETITION_PENALTY, step=0.05,
                     label="Repetition Penalty",
+                    info="Voice cloning always uses at least 1.5",
                 )
                 set_max_tokens = gr.Slider(
                     512, 8192, value=DEFAULT_MAX_TOKENS, step=256,
@@ -311,7 +313,14 @@ def wire(ctx, ui):
             parts.append("model unloaded")
         msg = f"Settings applied — {', '.join(parts)}."
         lang_update = gr.update(value=default_language)
-        return msg, msg, lang_update, lang_update, lang_update, lang_update, lang_update, lang_update
+        if default_language == LANGUAGE_AUTO:
+            # ASR uses its own "Auto" convention; library import has no auto option.
+            asr_update = gr.update(value="Auto")
+            lib_update = gr.update()
+        else:
+            asr_update = lang_update
+            lib_update = lang_update
+        return msg, msg, lang_update, lang_update, lang_update, lang_update, asr_update, lib_update
 
     def unload_model():
         ctx.engine.unload_model()

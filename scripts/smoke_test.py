@@ -89,6 +89,36 @@ def single_clone():
     assert_audio(r)
 
 
+def batch_clone():
+    assert ref_wav is not None, "custom-voice step must run first"
+    rs = engine.batch_generate_voice_clone(
+        ["Batched clone line one.", "Batched clone line two.", "Batched clone line three."],
+        str(ref_wav),
+        "This is the smoke test for single custom voice generation.",
+        language="English")
+    assert len(rs) == 3
+    for r in rs:
+        assert_audio(r, min_s=0.2)
+
+
+def vad_trim_real():
+    assert ref_wav is not None
+    import soundfile as sf
+    from audio_utils import trim_ref_silence
+    audio, sr = sf.read(str(ref_wav))
+    padded = np.concatenate(
+        [np.zeros(int(2.0 * sr), dtype=np.float32), audio.astype(np.float32),
+         np.zeros(int(3.0 * sr), dtype=np.float32)])
+    padded_path = ref_wav.parent / "padded.wav"
+    sf.write(str(padded_path), padded, sr)
+    trimmed_path = trim_ref_silence(str(padded_path))
+    assert trimmed_path != str(padded_path), "trim did not fire on padded clip"
+    trimmed, tsr = sf.read(trimmed_path)
+    orig_dur, trimmed_dur = len(audio) / sr, len(trimmed) / tsr
+    assert abs(trimmed_dur - orig_dur) < 1.0, (
+        f"trimmed {trimmed_dur:.1f}s vs original {orig_dur:.1f}s")
+
+
 def asr():
     assert ref_wav is not None
     text = engine.transcribe(str(ref_wav), language="auto")
@@ -101,6 +131,8 @@ if not args.fast:
     check("single voice_design", single_design)
     check("batch voice_design", batch_design)
 check("single voice_clone (ICL)", single_clone)
+check("batch voice_clone shared-ref (canary)", batch_clone)
+check("vad trim (real model)", vad_trim_real)
 if not args.fast:
     check("asr transcribe", asr)
 

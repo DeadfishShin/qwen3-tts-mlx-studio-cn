@@ -3,9 +3,9 @@ import types
 
 import gradio as gr
 
-from config import DEFAULT_SCRIPT_SILENCE_MS, DEFAULT_SPEAKERS, LANGUAGES, MAX_SCRIPT_SPEAKERS
+from config import DEFAULT_SCRIPT_SILENCE_MS, DEFAULT_SPEAKERS, LANGUAGE_AUTO, LANGUAGES, MAX_SCRIPT_SPEAKERS
 from audio_utils import concatenate_audio
-from generation import generate_with_timeout, save_audio
+from generation import api_language, generate_with_timeout, save_audio
 from script_parser import group_by_model_type, parse_script
 from ui.components import format_table_md, voice_choices
 
@@ -62,7 +62,8 @@ def build(ctx):
                             )
                             sm_speaker_modes.append(mode)
                             lang = gr.Dropdown(
-                                choices=LANGUAGES, value="English",
+                                choices=[LANGUAGE_AUTO] + LANGUAGES,
+                                value=LANGUAGE_AUTO,
                                 label="Language", scale=1,
                             )
                             sm_speaker_languages.append(lang)
@@ -111,6 +112,89 @@ def build(ctx):
     )
 
 
+def _generate_clone_lines_batched(ctx, lines, assignments_state, audio_by_line_number,
+                                  done, total_lines, progress):
+    """Generate Voice Clone script lines, batching lines that share a library voice.
+
+    Script clone lines always use library refs as saved (no trim). Returns
+    (succeeded_delta, failed_delta, done).
+    """
+    succeeded = failed = 0
+
+    def fail_line(line):
+        nonlocal failed, done
+        audio_by_line_number[line.line_number] = None
+        failed += 1
+        done += 1
+        progress(done / total_lines)
+
+    def run_line_single(line, ref_audio_path, ref_text, lang):
+        nonlocal succeeded, done
+        try:
+            sr, audio = generate_with_timeout(
+                ctx.engine.generate_voice_clone,
+                line.text, ref_audio_path, ref_text, lang,
+                denoise_ref=ctx.settings.denoise_ref,
+                timeout_seconds=ctx.settings.timeout,
+                **ctx.settings.gen_kwargs(),
+            )
+            audio_by_line_number[line.line_number] = (sr, audio)
+            succeeded += 1
+            done += 1
+            progress(done / total_lines, desc="Generating Voice Clone lines...")
+        except Exception:
+            fail_line(line)
+
+    # Group by (library voice, language) — one shared reference per batched call
+    groups = {}
+    for line in lines:
+        assignment = assignments_state.get(line.speaker, {})
+        key = (assignment.get("library_voice", ""), assignment.get("language", "English"))
+        groups.setdefault(key, []).append(line)
+
+    batch_size = ctx.settings.batch_size
+    for (lib_voice, lang), group_lines in groups.items():
+        lang = api_language(lang)
+        if not lib_voice or lib_voice == "None":
+            for line in group_lines:
+                fail_line(line)
+            continue
+        try:
+            voice = ctx.library.load_voice(lib_voice)
+            ref_audio_path = ctx.library.get_ref_audio_path(lib_voice)
+            ref_text = voice["ref_text"]
+        except FileNotFoundError:
+            for line in group_lines:
+                fail_line(line)
+            continue
+
+        if batch_size > 1 and len(group_lines) > 1:
+            for chunk_start in range(0, len(group_lines), batch_size):
+                chunk = group_lines[chunk_start:chunk_start + batch_size]
+                try:
+                    results = generate_with_timeout(
+                        ctx.engine.batch_generate_voice_clone,
+                        [l.text for l in chunk], ref_audio_path, ref_text, lang,
+                        denoise_ref=ctx.settings.denoise_ref,
+                        timeout_seconds=ctx.settings.timeout,
+                        **ctx.settings.gen_kwargs(),
+                    )
+                    for j, (sr, audio) in enumerate(results):
+                        audio_by_line_number[chunk[j].line_number] = (sr, audio)
+                        succeeded += 1
+                        done += 1
+                        progress(done / total_lines, desc="Generating Voice Clone lines...")
+                except Exception:
+                    # Batch failed — retry each line individually
+                    for line in chunk:
+                        run_line_single(line, ref_audio_path, ref_text, lang)
+        else:
+            for line in group_lines:
+                run_line_single(line, ref_audio_path, ref_text, lang)
+
+    return succeeded, failed, done
+
+
 def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progress=gr.Progress()):
     """Generate audio for a parsed multi-speaker script.
 
@@ -150,7 +234,13 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
         label = model_type_labels.get(model_type, model_type)
         batch_size = ctx.settings.batch_size
 
-        if model_type in ("custom_voice", "voice_design") and batch_size > 1:
+        if model_type == "base":
+            s, f, done = _generate_clone_lines_batched(
+                ctx, lines, assignments_state, audio_by_line_number,
+                done, total_lines, progress)
+            succeeded += s
+            failed += f
+        elif model_type in ("custom_voice", "voice_design") and batch_size > 1:
             # Batch generation for Custom Voice and Voice Design
             for batch_start in range(0, len(lines), batch_size):
                 batch_lines = lines[batch_start:batch_start + batch_size]
@@ -163,7 +253,7 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
                         lang = None
                         for line in batch_lines:
                             assignment = assignments_state.get(line.speaker, {})
-                            lang = assignment.get("language", "English")
+                            lang = api_language(assignment.get("language", "English"))
                             speakers.append(assignment.get("speaker", DEFAULT_SPEAKERS[0]))
                             instructs.append(assignment.get("instruct", ""))
 
@@ -178,7 +268,7 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
                         lang = None
                         for line in batch_lines:
                             assignment = assignments_state.get(line.speaker, {})
-                            lang = assignment.get("language", "English")
+                            lang = api_language(assignment.get("language", "English"))
                             instructs.append(assignment.get("instruct", ""))
 
                         results = generate_with_timeout(
@@ -198,7 +288,7 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
                     # Batch failed — retry each line individually
                     for line in batch_lines:
                         assignment = assignments_state.get(line.speaker, {})
-                        lang = assignment.get("language", "English")
+                        lang = api_language(assignment.get("language", "English"))
                         try:
                             if model_type == "custom_voice":
                                 sr, audio = generate_with_timeout(
@@ -227,11 +317,11 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
                         done += 1
                         progress(done / total_lines)
         else:
-            # Sequential generation (Voice Clone, or batch_size == 1)
+            # Sequential generation (Custom Voice / Voice Design at batch_size == 1)
             for line in lines:
                 assignment = assignments_state.get(line.speaker, {})
                 mode = assignment.get("mode", "custom_voice")
-                lang = assignment.get("language", "English")
+                lang = api_language(assignment.get("language", "English"))
 
                 try:
                     if mode == "custom_voice":
@@ -250,20 +340,6 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
                             line.text,
                             lang,
                             assignment.get("instruct", ""),
-                            timeout_seconds=ctx.settings.timeout,
-                            **ctx.settings.gen_kwargs(),
-                        )
-                    elif mode == "voice_clone":
-                        lib_voice = assignment.get("library_voice", "")
-                        if not lib_voice or lib_voice == "None":
-                            raise ValueError("No library voice selected for clone mode")
-                        voice = ctx.library.load_voice(lib_voice)
-                        ref_audio_path = ctx.library.get_ref_audio_path(lib_voice)
-                        ref_text = voice["ref_text"]
-                        sr, audio = generate_with_timeout(
-                            ctx.engine.generate_voice_clone,
-                            line.text, ref_audio_path, ref_text, lang,
-                            denoise_ref=ctx.settings.denoise_ref,
                             timeout_seconds=ctx.settings.timeout,
                             **ctx.settings.gen_kwargs(),
                         )
@@ -356,7 +432,7 @@ def wire(ctx, ui):
             assignments[spk] = {
                 "mode": "custom_voice",
                 "speaker": DEFAULT_SPEAKERS[0],
-                "language": "English",
+                "language": LANGUAGE_AUTO,
                 "instruct": "",
                 "library_voice": "None",
             }
@@ -391,7 +467,7 @@ def wire(ctx, ui):
                 "mode": mode_map.get(mode_label, "custom_voice"),
                 "speaker": slot_values[base + 1] if base + 1 < len(slot_values) else DEFAULT_SPEAKERS[0],
                 "instruct": slot_values[base + 2] if base + 2 < len(slot_values) else "",
-                "language": slot_values[base + 3] if base + 3 < len(slot_values) else "English",
+                "language": slot_values[base + 3] if base + 3 < len(slot_values) else LANGUAGE_AUTO,
                 "library_voice": slot_values[base + 4] if base + 4 < len(slot_values) else "None",
             }
 

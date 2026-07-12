@@ -94,16 +94,27 @@ def test_design_batch_requires_instruct(fake_engine, fake_history, tmp_path):
     assert rows == [["(empty)", "", ""]]
 
 
-def test_clone_mode_runs_sequentially(fake_engine, fake_history, tmp_path):
+def test_clone_mode_batches(fake_engine, fake_history, tmp_path):
     ctx = make_ctx(fake_engine, fake_history, tmp_path)
     r = GenRequest(mode="voice_clone", text="One.\n\nTwo.", language="English",
                    ref_audio="/tmp/ref.wav", ref_text="ref transcript")
     audio_update, rows, status = run_batch(ctx, r, "paragraph", 300, NoProgress())
     assert status == "Generated 2/2 segments"
-    clone_calls = [c for c in fake_engine.calls if c[0] == "generate_voice_clone"]
-    assert len(clone_calls) == 2               # no batch method used
+    batch_calls = [c for c in fake_engine.calls if c[0] == "batch_generate_voice_clone"]
+    assert len(batch_calls) == 1               # one shared-ref batched call
     assert fake_history.entries[0]["voice_params"] == "batch ref: uploaded"
     assert "speaker" not in fake_history.entries[0]
+
+
+def test_clone_batch_falls_back_individually(fake_engine, fake_history, tmp_path):
+    fake_engine.fail_batch = True
+    ctx = make_ctx(fake_engine, fake_history, tmp_path)
+    r = GenRequest(mode="voice_clone", text="One.\n\nTwo.", language="English",
+                   ref_audio="/tmp/ref.wav", ref_text="ref transcript")
+    audio_update, rows, status = run_batch(ctx, r, "paragraph", 300, NoProgress())
+    assert status == "Generated 2/2 segments"
+    singles = [c for c in fake_engine.calls if c[0] == "generate_voice_clone"]
+    assert len(singles) == 2
 
 
 def test_clone_batch_validation_strings(fake_engine, fake_history, tmp_path):

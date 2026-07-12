@@ -124,16 +124,34 @@ class TTSEngine:
         finally:
             self._release_lock()
 
+    def _prepare_ref(self, ref_audio_path, trim_ref, denoise_ref):
+        """Trim then denoise a reference clip. Returns (path, temp files to delete)."""
+        from audio_utils import denoise_ref_audio, trim_ref_silence
+        temps = []
+        if trim_ref:
+            trimmed = trim_ref_silence(ref_audio_path)
+            if trimmed != ref_audio_path:
+                temps.append(trimmed)
+                ref_audio_path = trimmed
+        if denoise_ref:
+            denoised = denoise_ref_audio(ref_audio_path)
+            temps.append(denoised)
+            ref_audio_path = denoised
+        return ref_audio_path, temps
+
+    @staticmethod
+    def _cleanup_temps(temps):
+        for path in temps:
+            if os.path.isfile(path):
+                os.remove(path)
+
     def generate_voice_clone(self, text, ref_audio_path, ref_text, language="English",
-                             denoise_ref=False, **kwargs) -> tuple:
+                             denoise_ref=False, trim_ref=False, **kwargs) -> tuple:
         """Returns (sample_rate, numpy_audio_array)."""
         self._acquire_lock()
-        tmp_denoised = None
+        temps = []
         try:
-            if denoise_ref:
-                from audio_utils import denoise_ref_audio
-                tmp_denoised = denoise_ref_audio(ref_audio_path)
-                ref_audio_path = tmp_denoised
+            ref_audio_path, temps = self._prepare_ref(ref_audio_path, trim_ref, denoise_ref)
             self._load_model("base")
             results = list(
                 self.current_model.generate(
@@ -144,8 +162,36 @@ class TTSEngine:
             )
             return self._to_numpy(results[0])
         finally:
-            if tmp_denoised and os.path.isfile(tmp_denoised):
-                os.remove(tmp_denoised)
+            self._cleanup_temps(temps)
+            self._release_lock()
+
+    def batch_generate_voice_clone(self, texts, ref_audio_path, ref_text,
+                                   language="English", denoise_ref=False,
+                                   trim_ref=False, **kwargs):
+        """Clone-generate multiple texts sharing ONE reference in a batched pass.
+
+        Upstream batch_generate supports a single shared reference per call
+        (and silently enforces repetition_penalty >= 1.5 on the ICL path).
+        Returns list of (sample_rate, numpy_audio_array) in input order.
+        """
+        self._acquire_lock()
+        temps = []
+        try:
+            ref_audio_path, temps = self._prepare_ref(ref_audio_path, trim_ref, denoise_ref)
+            self._load_model("base")
+            results = list(
+                self.current_model.batch_generate(
+                    texts=texts,
+                    ref_audio=ref_audio_path,
+                    ref_text=ref_text,
+                    lang_code=language,
+                    **kwargs,
+                )
+            )
+            results.sort(key=lambda r: r.sequence_idx)
+            return [self._to_numpy(r) for r in results]
+        finally:
+            self._cleanup_temps(temps)
             self._release_lock()
 
     def batch_generate_custom_voice(self, texts, speaker, language, instruct="", **kwargs):

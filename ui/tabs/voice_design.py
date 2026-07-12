@@ -30,7 +30,8 @@ def build(ctx):
                     placeholder=S.VD_INSTRUCT_PLACEHOLDER,
                 )
                 vd_language = gr.Dropdown(
-                    choices=LANGUAGES, value="English", label=S.LANGUAGE
+                    choices=[S.LANGUAGE_AUTO] + LANGUAGES,
+                    value=S.LANGUAGE_AUTO, label=S.LANGUAGE
                 )
                 gr.Markdown(S.TIP_TEXT_LENGTH, elem_classes=["text-hint"])
                 vd_generate = gr.Button(S.GENERATE, variant="primary")

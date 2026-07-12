@@ -13,7 +13,7 @@ from typing import Callable, Optional
 import gradio as gr
 
 from audio_utils import concatenate_audio, export_audio, split_text
-from config import MAX_BATCH_SEGMENTS
+from config import LANGUAGE_AUTO, MAX_BATCH_SEGMENTS
 
 
 class GenerationTimeout(Exception):
@@ -98,6 +98,12 @@ class GenRequest:
     ref_audio: Optional[str] = None  # voice_clone
     ref_text: str = ""              # voice_clone
     library_voice: str = "None"     # voice_clone
+    trim_ref: bool = True           # voice_clone: VAD-trim reference silence
+
+
+def api_language(language):
+    """Map the UI language choice to the engine API value."""
+    return "auto" if language == LANGUAGE_AUTO else language
 
 
 def _clone_voice_info(req):
@@ -195,7 +201,7 @@ class ModeSpec:
     history_kwargs: Callable        # (req) -> dict of extra history.add fields
     status_extras: Callable         # (ctx) -> str appended to success status
     batch_prepare: Callable         # (ctx, req) -> (req | None, (table_rows, error) | None)
-    call_batch: Optional[Callable]  # (ctx, texts, req, **gen_kwargs) -> [(sr, audio)]; None = sequential
+    call_batch: Callable            # (ctx, texts, req, **gen_kwargs) -> [(sr, audio)]
     batch_history_kwargs: Callable  # (req, split_mode) -> dict of extra history.add fields
 
 
@@ -205,14 +211,14 @@ MODES = {
         validate=_validate_common,
         prepare=_no_prepare,
         call_single=lambda ctx, req, **kw: ctx.engine.generate_custom_voice(
-            req.text, req.speaker, req.language, req.instruct, **kw),
+            req.text, req.speaker, api_language(req.language), req.instruct, **kw),
         history_kwargs=lambda req: dict(
             speaker=req.speaker,
             voice_params=req.instruct if req.instruct else ""),
         status_extras=_no_extras,
         batch_prepare=_batch_prepare_identity,
         call_batch=lambda ctx, texts, req, **kw: ctx.engine.batch_generate_custom_voice(
-            texts, req.speaker, req.language, req.instruct, **kw),
+            texts, req.speaker, api_language(req.language), req.instruct, **kw),
         batch_history_kwargs=lambda req, split_mode: dict(
             speaker=req.speaker, voice_params=f"batch ({split_mode})"),
     ),
@@ -221,12 +227,12 @@ MODES = {
         validate=_validate_design,
         prepare=_no_prepare,
         call_single=lambda ctx, req, **kw: ctx.engine.generate_voice_design(
-            req.text, req.language, req.instruct, **kw),
+            req.text, api_language(req.language), req.instruct, **kw),
         history_kwargs=lambda req: dict(voice_params=req.instruct),
         status_extras=_no_extras,
         batch_prepare=_batch_prepare_design,
         call_batch=lambda ctx, texts, req, **kw: ctx.engine.batch_generate_voice_design(
-            texts, req.language, req.instruct, **kw),
+            texts, api_language(req.language), req.instruct, **kw),
         batch_history_kwargs=lambda req, split_mode: dict(
             voice_params=f"batch ({split_mode})"),
     ),
@@ -235,13 +241,15 @@ MODES = {
         validate=_validate_common,
         prepare=_prepare_clone,
         call_single=lambda ctx, req, **kw: ctx.engine.generate_voice_clone(
-            req.text, req.ref_audio, req.ref_text, req.language,
-            denoise_ref=ctx.settings.denoise_ref, **kw),
+            req.text, req.ref_audio, req.ref_text, api_language(req.language),
+            denoise_ref=ctx.settings.denoise_ref, trim_ref=req.trim_ref, **kw),
         history_kwargs=lambda req: dict(
             voice_params=f"ref: {_clone_voice_info(req)}"),
         status_extras=_clone_extras,
         batch_prepare=_batch_prepare_clone,
-        call_batch=None,            # sequential today; Stage 2 adds shared-ref batching
+        call_batch=lambda ctx, texts, req, **kw: ctx.engine.batch_generate_voice_clone(
+            texts, req.ref_audio, req.ref_text, api_language(req.language),
+            denoise_ref=ctx.settings.denoise_ref, trim_ref=req.trim_ref, **kw),
         batch_history_kwargs=lambda req, split_mode: dict(
             voice_params=f"batch ref: {_clone_voice_info(req)}"),
     ),
@@ -332,31 +340,27 @@ def run_batch(ctx, req, split_mode, silence_ms, progress):
             table_rows.append([str(idx + 1), preview, f"Failed: {e}"])
             failed += 1
 
-    if spec.call_batch is not None:
-        for batch_start in range(0, total, batch_size):
-            batch_segs = segments[batch_start:batch_start + batch_size]
-            batch_indices = list(range(batch_start, batch_start + len(batch_segs)))
-            try:
-                results = generate_with_timeout(
-                    spec.call_batch, ctx, batch_segs, req,
-                    timeout_seconds=ctx.settings.timeout,
-                    **ctx.settings.gen_kwargs(),
-                )
-                for j, (sr, audio) in enumerate(results):
-                    idx = batch_indices[j]
-                    audio_parts.append((sr, audio))
-                    table_rows.append(
-                        [str(idx + 1), _segment_preview(batch_segs[j]), f"{len(audio) / sr:.1f}s"])
-                    succeeded += 1
-                    progress((batch_start + j + 1) / total, desc="Generating segments")
-            except Exception:
-                # Batch failed — retry each segment individually
-                for j, seg in enumerate(batch_segs):
-                    run_one(batch_indices[j], seg)
-                    progress((batch_start + j + 1) / total, desc="Generating segments")
-    else:
-        for i, seg in enumerate(progress.tqdm(segments, desc="Generating segments")):
-            run_one(i, seg)
+    for batch_start in range(0, total, batch_size):
+        batch_segs = segments[batch_start:batch_start + batch_size]
+        batch_indices = list(range(batch_start, batch_start + len(batch_segs)))
+        try:
+            results = generate_with_timeout(
+                spec.call_batch, ctx, batch_segs, req,
+                timeout_seconds=ctx.settings.timeout,
+                **ctx.settings.gen_kwargs(),
+            )
+            for j, (sr, audio) in enumerate(results):
+                idx = batch_indices[j]
+                audio_parts.append((sr, audio))
+                table_rows.append(
+                    [str(idx + 1), _segment_preview(batch_segs[j]), f"{len(audio) / sr:.1f}s"])
+                succeeded += 1
+                progress((batch_start + j + 1) / total, desc="Generating segments")
+        except Exception:
+            # Batch failed — retry each segment individually
+            for j, seg in enumerate(batch_segs):
+                run_one(batch_indices[j], seg)
+                progress((batch_start + j + 1) / total, desc="Generating segments")
 
     if not audio_parts:
         return None, table_rows, "All segments failed"

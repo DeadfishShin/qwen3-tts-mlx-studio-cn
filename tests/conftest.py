@@ -31,36 +31,45 @@ class FakeEngine:
         return f"fake/{model_type}-{self.model_size}-{self.quantization}"
 
     def generate_custom_voice(self, text, speaker, language, instruct="", **kw):
-        self.calls.append(("generate_custom_voice", text))
+        self.calls.append(("generate_custom_voice", text, language))
         if "custom_voice" in self.fail_modes:
             raise RuntimeError("fake single failure")
         self.current_model_type = "custom_voice"
         return self._audio()
 
     def generate_voice_design(self, text, language, instruct, **kw):
-        self.calls.append(("generate_voice_design", text))
+        self.calls.append(("generate_voice_design", text, language))
         if "voice_design" in self.fail_modes:
             raise RuntimeError("fake single failure")
         self.current_model_type = "voice_design"
         return self._audio()
 
     def generate_voice_clone(self, text, ref_audio_path, ref_text, language="English",
-                             denoise_ref=False, **kw):
-        self.calls.append(("generate_voice_clone", text))
+                             denoise_ref=False, trim_ref=False, **kw):
+        self.calls.append(("generate_voice_clone", text, language))
         if "voice_clone" in self.fail_modes:
             raise RuntimeError("fake single failure")
         self.current_model_type = "base"
         return self._audio()
 
+    def batch_generate_voice_clone(self, texts, ref_audio_path, ref_text,
+                                   language="English", denoise_ref=False,
+                                   trim_ref=False, **kw):
+        self.calls.append(("batch_generate_voice_clone", tuple(texts), language))
+        if self.fail_batch:
+            raise RuntimeError("fake batch failure")
+        self.current_model_type = "base"
+        return [self._audio() for _ in texts]
+
     def batch_generate_custom_voice(self, texts, speaker, language, instruct="", **kw):
-        self.calls.append(("batch_generate_custom_voice", tuple(texts)))
+        self.calls.append(("batch_generate_custom_voice", tuple(texts), language))
         if self.fail_batch:
             raise RuntimeError("fake batch failure")
         self.current_model_type = "custom_voice"
         return [self._audio() for _ in texts]
 
     def batch_generate_voice_design(self, texts, language, instruct, **kw):
-        self.calls.append(("batch_generate_voice_design", tuple(texts)))
+        self.calls.append(("batch_generate_voice_design", tuple(texts), language))
         if self.fail_batch:
             raise RuntimeError("fake batch failure")
         self.current_model_type = "voice_design"

@@ -10,10 +10,55 @@ import tempfile
 import numpy as np
 import soundfile as sf
 
-from config import DEFAULT_SAMPLE_RATE, DEEPFILTER_REPO
+from config import DEFAULT_SAMPLE_RATE, DEEPFILTER_REPO, VAD_REPO
 
 
 _deepfilter_model = None  # lazy singleton
+_vad_model = None  # lazy singleton
+
+
+def _get_vad():
+    """Load Silero VAD on first use (~2MB download, cached after)."""
+    global _vad_model
+    if _vad_model is None:
+        from mlx_audio.vad.utils import load_model as load_vad_model
+        _vad_model = load_vad_model(VAD_REPO)
+    return _vad_model
+
+
+def unload_vad():
+    """Free VAD model from memory."""
+    global _vad_model
+    if _vad_model is not None:
+        del _vad_model
+        _vad_model = None
+        gc.collect()
+
+
+def trim_ref_silence(input_path: str) -> str:
+    """Trim non-speech lead/tail off a reference clip via Silero VAD.
+
+    Keeps the full span from first to last detected speech (internal pauses
+    are never cut), padded 150 ms each side. Returns a temp WAV path, or the
+    original path when no speech is detected or the trim would save <200 ms.
+    Caller is responsible for cleanup of the temp file.
+    """
+    pad_s, min_saving_s = 0.15, 0.2
+    timestamps = _get_vad().get_speech_timestamps(input_path, return_seconds=True)
+    if not timestamps:
+        return input_path
+    audio, sr = sf.read(input_path, dtype="float32")
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+    duration = len(audio) / sr
+    start = max(0.0, timestamps[0]["start"] - pad_s)
+    end = min(duration, timestamps[-1]["end"] + pad_s)
+    if duration - (end - start) < min_saving_s:
+        return input_path
+    fd, tmp_path = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
+    sf.write(tmp_path, audio[int(start * sr):int(end * sr)], sr)
+    return tmp_path
 
 
 def _get_deepfilter_model():

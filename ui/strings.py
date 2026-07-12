@@ -3,6 +3,7 @@
 Stage 1 rule: every value is copied VERBATIM from the original app.py.
 Rewording happens in Stage 4 (clarity pass) — in this file only.
 """
+from config import LANGUAGE_AUTO as CONFIG_LANGUAGE_AUTO
 
 # --- App shell ---
 APP_TITLE = "Qwen3-TTS MLX Studio"
@@ -18,7 +19,12 @@ STATUS_READY = "Ready"
 TEXT_PLACEHOLDER = "Enter text to speak..."
 TIP_TEXT_LENGTH = "_Tip: 1–4 sentences work best. Very long text may hit the 120 s timeout._"
 LANGUAGE = "Language"
+LANGUAGE_AUTO = CONFIG_LANGUAGE_AUTO  # UI label for automatic detection
 GENERATE = "Generate"
+
+# --- Voice cloning extras (Stage 2) ---
+TRIM_REF_LABEL = "Trim silence from reference (recommended)"
+REP_PENALTY_CLONE_INFO = "Voice cloning always uses at least 1.5"
 
 # --- Shared output column ---
 OUTPUT = "Output"
