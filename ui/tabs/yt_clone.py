@@ -6,7 +6,7 @@ import gradio as gr
 
 from config import LANGUAGE_AUTO, LANGUAGES
 from generation import (
-    GenerationTimeout, api_language, generate_with_timeout, save_audio,
+    GenerationCancelled, GenerationTimeout, GenRequest, generate_once, save_audio,
 )
 from ui.components import voice_choices, voice_table
 from ui.tabs.voice_clone import save_clone_to_library
@@ -250,14 +250,10 @@ def clone_yt_voice(ctx, text, ref_audio, transcript, language, voice_name, trim_
 
     try:
         t0 = time.time()
-        result = generate_with_timeout(
-            ctx.engine.generate_voice_clone,
-            text.strip(), ref_audio, transcript.strip(), api_language(language),
-            denoise_ref=ctx.settings.denoise_ref,
-            trim_ref=trim_ref,
-            timeout_seconds=ctx.settings.timeout,
-            **ctx.settings.gen_kwargs(),
-        )
+        ctx.cancel_event.clear()
+        result = generate_once(ctx, GenRequest(
+            mode="voice_clone", text=text.strip(), language=language,
+            ref_audio=ref_audio, ref_text=transcript.strip(), trim_ref=trim_ref))
         elapsed = time.time() - t0
         lib_msg = save_clone_to_library(
             ctx, ref_audio, transcript.strip(), voice_name.strip(), language
@@ -281,6 +277,8 @@ def clone_yt_voice(ctx, text, ref_audio, transcript, language, voice_name, trim_
             gr.update(choices=voice_choices(ctx)),
             gr.update(value=voice_table(ctx)),
         )
+    except GenerationCancelled:
+        return gr.update(), "Stopped", "Stopped", gr.update(), gr.update()
     except GenerationTimeout as e:
         gr.Warning(str(e))
         return gr.update(), str(e), str(e), gr.update(), gr.update()

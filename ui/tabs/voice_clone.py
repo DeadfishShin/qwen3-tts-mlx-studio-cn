@@ -8,7 +8,7 @@ from generation import GenRequest, run_batch, run_single, save_audio
 from ui import strings as S
 from ui.components import (
     build_batch_accordion, build_lib_save_accordion, build_output_column,
-    voice_choices,
+    voice_choices, wire_run_lifecycle, wire_stop,
 )
 
 
@@ -61,7 +61,8 @@ def build(ctx):
         vc_batch_generate=batch.batch_generate, vc_batch_table=batch.batch_table,
         vc_batch_audio=batch.batch_audio, vc_batch_save=batch.batch_save,
         vc_batch_status=batch.batch_status,
-        vc_audio=out.audio, vc_save=out.save, vc_save_status=out.save_status,
+        vc_audio=out.audio, vc_result=out.result_state, vc_stop=out.stop,
+        vc_save=out.save, vc_save_status=out.save_status,
     )
 
 
@@ -113,7 +114,7 @@ def wire(ctx, ui):
 
     def on_batch(text, ref_audio, ref_text, language, library_voice, trim_ref,
                  split_mode, silence_ms, progress=gr.Progress()):
-        return run_batch(ctx, GenRequest(
+        yield from run_batch(ctx, GenRequest(
             mode="voice_clone", text=text, language=language,
             ref_audio=ref_audio, ref_text=ref_text, library_voice=library_voice,
             trim_ref=trim_ref),
@@ -129,26 +130,25 @@ def wire(ctx, ui):
     def on_transcribe(ref_audio):
         yield from transcribe_reference(ctx, ref_audio)
 
-    t.vc_transcribe_btn.click(
-        fn=on_transcribe,
+    wire_stop(ctx, t.vc_stop, ui.status)
+    wire_run_lifecycle(
+        t.vc_transcribe_btn, t.vc_stop, on_transcribe,
         inputs=[t.vc_ref_audio],
         outputs=[t.vc_ref_text, ui.status],
-        show_progress="minimal",
     )
-    t.vc_generate.click(
-        fn=on_generate,
+    wire_run_lifecycle(
+        t.vc_generate, t.vc_stop, on_generate,
         inputs=[t.vc_text, t.vc_ref_audio, t.vc_ref_text, t.vc_language, t.vc_library_voice,
                 t.vc_trim_ref],
-        outputs=[t.vc_audio, ui.status],
-        show_progress="minimal",
+        outputs=[t.vc_audio, t.vc_result, ui.status],
     )
     t.vc_save.click(
         fn=lambda audio: save_audio(ctx, audio, "clone"),
-        inputs=[t.vc_audio],
+        inputs=[t.vc_result],
         outputs=[t.vc_save_status],
     )
-    t.vc_batch_generate.click(
-        fn=on_batch,
+    wire_run_lifecycle(
+        t.vc_batch_generate, t.vc_stop, on_batch,
         inputs=[t.vc_text, t.vc_ref_audio, t.vc_ref_text, t.vc_language, t.vc_library_voice,
                 t.vc_trim_ref, t.vc_batch_split, t.vc_batch_silence],
         outputs=[t.vc_batch_audio, t.vc_batch_table, t.vc_batch_status],

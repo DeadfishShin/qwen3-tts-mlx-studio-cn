@@ -11,7 +11,7 @@ from generation import GenRequest, run_batch, run_single, save_audio
 from ui import strings as S
 from ui.components import (
     build_batch_accordion, build_lib_save_accordion, build_output_column,
-    voice_choices,
+    voice_choices, wire_run_lifecycle, wire_stop,
 )
 
 
@@ -46,7 +46,8 @@ def build(ctx):
         vd_batch_generate=batch.batch_generate, vd_batch_table=batch.batch_table,
         vd_batch_audio=batch.batch_audio, vd_batch_save=batch.batch_save,
         vd_batch_status=batch.batch_status,
-        vd_audio=out.audio, vd_save=out.save, vd_save_status=out.save_status,
+        vd_audio=out.audio, vd_result=out.result_state, vd_stop=out.stop,
+        vd_save=out.save, vd_save_status=out.save_status,
     )
 
 
@@ -82,7 +83,7 @@ def wire(ctx, ui):
 
     def on_batch(text, language, instruct, split_mode, silence_ms,
                  progress=gr.Progress()):
-        return run_batch(ctx, GenRequest(
+        yield from run_batch(ctx, GenRequest(
             mode="voice_design", text=text, language=language, instruct=instruct),
             split_mode, silence_ms, progress)
 
@@ -91,19 +92,19 @@ def wire(ctx, ui):
                                         description, spoken_text)
         return result, gr.update(choices=voice_choices(ctx))
 
-    t.vd_generate.click(
-        fn=on_generate,
+    wire_stop(ctx, t.vd_stop, ui.status)
+    wire_run_lifecycle(
+        t.vd_generate, t.vd_stop, on_generate,
         inputs=[t.vd_text, t.vd_language, t.vd_instruct],
-        outputs=[t.vd_audio, ui.status],
-        show_progress="minimal",
+        outputs=[t.vd_audio, t.vd_result, ui.status],
     )
     t.vd_save.click(
         fn=lambda audio: save_audio(ctx, audio, "design"),
-        inputs=[t.vd_audio],
+        inputs=[t.vd_result],
         outputs=[t.vd_save_status],
     )
-    t.vd_batch_generate.click(
-        fn=on_batch,
+    wire_run_lifecycle(
+        t.vd_batch_generate, t.vd_stop, on_batch,
         inputs=[t.vd_text, t.vd_language, t.vd_instruct,
                 t.vd_batch_split, t.vd_batch_silence],
         outputs=[t.vd_batch_audio, t.vd_batch_table, t.vd_batch_status],
@@ -116,6 +117,6 @@ def wire(ctx, ui):
     )
     t.vd_lib_save.click(
         fn=save_and_refresh,
-        inputs=[t.vd_audio, t.vd_lib_name, t.vd_language, t.vd_instruct, t.vd_text],
+        inputs=[t.vd_result, t.vd_lib_name, t.vd_language, t.vd_instruct, t.vd_text],
         outputs=[t.vd_lib_status, ui.vc.vc_library_voice],
     )

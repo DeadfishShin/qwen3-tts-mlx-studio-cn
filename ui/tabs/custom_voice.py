@@ -6,7 +6,9 @@ import gradio as gr
 from config import DEFAULT_SPEAKERS, LANGUAGES
 from generation import GenRequest, run_batch, run_single, save_audio
 from ui import strings as S
-from ui.components import build_batch_accordion, build_output_column
+from ui.components import (
+    build_batch_accordion, build_output_column, wire_run_lifecycle, wire_stop,
+)
 
 
 def build(ctx):
@@ -45,7 +47,8 @@ def build(ctx):
         cv_batch_generate=batch.batch_generate, cv_batch_table=batch.batch_table,
         cv_batch_audio=batch.batch_audio, cv_batch_save=batch.batch_save,
         cv_batch_status=batch.batch_status,
-        cv_audio=out.audio, cv_save=out.save, cv_save_status=out.save_status,
+        cv_audio=out.audio, cv_result=out.result_state, cv_stop=out.stop,
+        cv_save=out.save, cv_save_status=out.save_status,
     )
 
 
@@ -59,24 +62,24 @@ def wire(ctx, ui):
 
     def on_batch(text, speaker, language, instruct, split_mode, silence_ms,
                  progress=gr.Progress()):
-        return run_batch(ctx, GenRequest(
+        yield from run_batch(ctx, GenRequest(
             mode="custom_voice", text=text, speaker=speaker,
             language=language, instruct=instruct),
             split_mode, silence_ms, progress)
 
-    t.cv_generate.click(
-        fn=on_generate,
+    wire_stop(ctx, t.cv_stop, ui.status)
+    wire_run_lifecycle(
+        t.cv_generate, t.cv_stop, on_generate,
         inputs=[t.cv_text, t.cv_speaker, t.cv_language, t.cv_instruct],
-        outputs=[t.cv_audio, ui.status],
-        show_progress="minimal",
+        outputs=[t.cv_audio, t.cv_result, ui.status],
     )
     t.cv_save.click(
         fn=lambda audio: save_audio(ctx, audio, "custom"),
-        inputs=[t.cv_audio],
+        inputs=[t.cv_result],
         outputs=[t.cv_save_status],
     )
-    t.cv_batch_generate.click(
-        fn=on_batch,
+    wire_run_lifecycle(
+        t.cv_batch_generate, t.cv_stop, on_batch,
         inputs=[t.cv_text, t.cv_speaker, t.cv_language, t.cv_instruct,
                 t.cv_batch_split, t.cv_batch_silence],
         outputs=[t.cv_batch_audio, t.cv_batch_table, t.cv_batch_status],
