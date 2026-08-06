@@ -36,7 +36,7 @@ def voice_table(ctx):
         for v in voices
     ]
     return format_table_md(
-        ["Name", "Source", "Language", "Description"],
+        S.LIB_TABLE_HEADERS,
         rows,
         S.NO_VOICES,
     )
@@ -45,7 +45,7 @@ def voice_table(ctx):
 def history_table_md(ctx):
     """Return history data formatted as a Markdown table string."""
     return format_table_md(
-        ["ID", "Time", "Mode", "Text", "Duration"],
+        S.HIST_TABLE_HEADERS,
         ctx.history.table_data(),
         S.NO_HISTORY,
     )

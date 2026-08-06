@@ -5,48 +5,49 @@ import types
 import gradio as gr
 
 from config import LANGUAGES
+from ui import strings as S
 from ui.components import voice_table
 
 
 def build(ctx):
-    with gr.Tab("Voice Library"):
+    with gr.Tab(S.TAB_LIBRARY):
         with gr.Row():
             with gr.Column(scale=2):
-                lib_table = gr.Markdown(value=voice_table(ctx), label="Saved Voices")
+                lib_table = gr.Markdown(value=voice_table(ctx), label=S.LIB_TABLE_LABEL)
                 with gr.Row():
                     lib_selected = gr.Textbox(
-                        label="Voice Name",
-                        placeholder="Type or paste voice name",
+                        label=S.LIB_SELECTED,
+                        placeholder=S.LIB_SELECTED_PLACEHOLDER,
                         scale=2,
                     )
-                    lib_preview_btn = gr.Button("Preview", scale=1)
-                    lib_delete_btn = gr.Button("Delete", scale=1)
+                    lib_preview_btn = gr.Button(S.LIB_PREVIEW, scale=1)
+                    lib_delete_btn = gr.Button(S.LIB_DELETE, scale=1)
                 with gr.Row():
                     lib_new_name = gr.Textbox(
-                        label="Rename To", placeholder="new_name", scale=2
+                        label=S.LIB_RENAME_TO, placeholder=S.LIB_RENAME_PLACEHOLDER, scale=2
                     )
-                    lib_rename_btn = gr.Button("Rename", scale=1)
-                lib_preview_audio = gr.Audio(label="Reference Audio Preview", buttons=["download"])
+                    lib_rename_btn = gr.Button(S.LIB_RENAME, scale=1)
+                lib_preview_audio = gr.Audio(label=S.LIB_PREVIEW_AUDIO, buttons=["download"])
                 lib_status = gr.Textbox(
                     show_label=False, interactive=False,
-                    placeholder="Status…",
+                    placeholder=S.LIB_STATUS_TEXT_PLACEHOLDER,
                     elem_classes=["save-status-text"],
                 )
             with gr.Column(scale=1, elem_classes=["output-col"]):
-                gr.Markdown("### Import Voice")
+                gr.Markdown(S.LIB_IMPORT_HEADER)
                 lib_import_audio = gr.Audio(
-                    label="Audio File", type="filepath", buttons=["download"]
+                    label=S.VC_REF_AUDIO, type="filepath", buttons=["download"]
                 )
                 lib_import_transcript = gr.Textbox(
-                    label="Transcript", lines=3
+                    label=S.LIB_IMPORT_TRANSCRIPT, lines=3
                 )
                 lib_import_name = gr.Textbox(
-                    label="Name", placeholder="imported_voice"
+                    label=S.LIB_IMPORT_NAME, placeholder=S.LIB_IMPORT_NAME_PLACEHOLDER
                 )
                 lib_import_language = gr.Dropdown(
-                    choices=LANGUAGES, value="English", label="Language"
+                    choices=LANGUAGES, value="English", label=S.LANGUAGE
                 )
-                lib_import_btn = gr.Button("Import Voice", variant="primary")
+                lib_import_btn = gr.Button(S.LIB_IMPORT, variant="primary")
     return types.SimpleNamespace(
         lib_table=lib_table, lib_selected=lib_selected,
         lib_preview_btn=lib_preview_btn, lib_delete_btn=lib_delete_btn,
@@ -74,42 +75,42 @@ def preview_voice(ctx, voice_name):
 
 def delete_voice(ctx, voice_name):
     if not voice_name or voice_name == "(empty)":
-        return voice_table(ctx), "Select a voice first"
+        return voice_table(ctx), S.LIB_SELECT_FIRST
     if not ctx.library.delete_voice(voice_name):
-        return voice_table(ctx), f"Voice '{voice_name}' not found"
-    return voice_table(ctx), f"Deleted '{voice_name}'"
+        return voice_table(ctx), S.LIB_VOICE_NOT_FOUND.format(name=voice_name)
+    return voice_table(ctx), S.LIB_DELETED.format(name=voice_name)
 
 
 def rename_voice(ctx, old_name, new_name):
     if not old_name or old_name == "(empty)":
-        return voice_table(ctx), "Select a voice first"
+        return voice_table(ctx), S.LIB_SELECT_FIRST
     if not new_name.strip():
-        return voice_table(ctx), "Enter a new name"
+        return voice_table(ctx), S.LIB_ENTER_NEW_NAME
     ok = ctx.library.rename_voice(old_name, new_name.strip())
     if ok:
-        return voice_table(ctx), f"Renamed '{old_name}' to '{new_name.strip()}'"
-    return voice_table(ctx), f"Rename failed (name may already exist)"
+        return voice_table(ctx), S.LIB_RENAMED.format(old=old_name, new=new_name.strip())
+    return voice_table(ctx), S.LIB_RENAME_FAILED
 
 
 def import_voice(ctx, audio_path, transcript, name, language):
     if not audio_path:
-        gr.Warning("Upload audio to import.")
-        return voice_table(ctx), "Upload audio first"
+        gr.Warning(S.LIB_IMPORT_NO_AUDIO_WARN)
+        return voice_table(ctx), S.LIB_IMPORT_NO_AUDIO
     if not name.strip():
-        gr.Warning("Enter a name for the imported voice.")
-        return voice_table(ctx), "Enter a name"
+        gr.Warning(S.LIB_IMPORT_NO_NAME_WARN)
+        return voice_table(ctx), S.LIB_IMPORT_NO_NAME
     if not transcript or not transcript.strip():
-        gr.Warning("Transcript required for imported voice.")
-        return voice_table(ctx), "Enter transcript"
+        gr.Warning(S.LIB_IMPORT_NO_TRANSCRIPT_WARN)
+        return voice_table(ctx), S.LIB_IMPORT_NO_TRANSCRIPT
     ctx.library.save_voice(
         name=name.strip(),
         ref_audio_path=audio_path,
         ref_text=transcript.strip(),
         language=language,
-        description="Imported voice",
+        description=S.LIB_IMPORTED_DESCRIPTION,
         source="import",
     )
-    return voice_table(ctx), f"Imported '{name.strip()}'"
+    return voice_table(ctx), S.LIB_IMPORTED.format(name=name.strip())
 
 
 def wire(ctx, ui):

@@ -37,6 +37,21 @@ def test_stream_transcription_stop_keeps_partial(fake_engine, fake_history):
     assert list(gen) == []                        # generator ends cleanly
 
 
+def test_tab_handler_maps_auto_detect(fake_engine, fake_history):
+    from ui.tabs.transcription import transcribe_audio
+    ctx = make_ctx(fake_engine, fake_history)
+    seen = {}
+    orig = fake_engine.stream_transcribe
+
+    def spy(audio_path, language="auto"):
+        seen["language"] = language
+        return orig(audio_path, language=language)
+
+    fake_engine.stream_transcribe = spy
+    list(transcribe_audio(ctx, "/tmp/x.wav", "Auto-detect"))
+    assert seen["language"] == "auto"
+
+
 def test_stream_transcription_error(fake_engine, fake_history):
     def boom(audio_path, language="auto"):
         raise RuntimeError("no asr")
