@@ -4,35 +4,36 @@ import types
 import gradio as gr
 
 from generation import save_audio
+from ui import strings as S
 from ui.components import history_table_md
 
 
 def build(ctx):
-    with gr.Tab("History"):
-        hist_table = gr.Markdown(value=history_table_md(ctx), label="Generation History", elem_classes=["history-table"])
+    with gr.Tab(S.TAB_HISTORY):
+        hist_table = gr.Markdown(value=history_table_md(ctx), label=S.HIST_TABLE_LABEL, elem_classes=["history-table"])
         with gr.Row():
             hist_selected = gr.Textbox(
-                label="Entry ID",
-                placeholder="Paste entry ID to preview/manage",
+                label=S.HIST_ENTRY_ID,
+                placeholder=S.HIST_ENTRY_PLACEHOLDER,
                 scale=3,
             )
-            hist_preview_btn = gr.Button("Preview", scale=1)
-            hist_delete_btn = gr.Button("Delete Entry", scale=1)
+            hist_preview_btn = gr.Button(S.HIST_PREVIEW, scale=1)
+            hist_delete_btn = gr.Button(S.HIST_DELETE, scale=1)
         with gr.Row():
-            hist_save_btn = gr.Button("Save Audio", scale=1)
-            hist_regen_btn = gr.Button("Show Params", scale=1)
-            hist_clear_btn = gr.Button("Clear All History", scale=1)
+            hist_save_btn = gr.Button(S.SAVE_AUDIO, scale=1)
+            hist_regen_btn = gr.Button(S.HIST_VIEW_SETTINGS, scale=1)
+            hist_clear_btn = gr.Button(S.HIST_CLEAR, scale=1)
         hist_status = gr.Textbox(
             show_label=False, interactive=False,
-            placeholder="Status…",
+            placeholder=S.HIST_STATUS_PLACEHOLDER,
             elem_classes=["save-status-text"],
         )
         with gr.Row():
             hist_audio = gr.Audio(
-                label="Audio Preview", type="numpy", interactive=False, scale=1, buttons=["download"]
+                label=S.OUTPUT, type="numpy", interactive=False, scale=1, buttons=["download"]
             )
             hist_regen_info = gr.Textbox(
-                label="Regeneration Params", interactive=False, lines=3, scale=1
+                label=S.HIST_SETTINGS_LABEL, interactive=False, lines=3, scale=1
             )
     return types.SimpleNamespace(
         hist_table=hist_table, hist_selected=hist_selected,
@@ -49,7 +50,7 @@ def history_preview(ctx, entry_id):
         return None
     audio = ctx.history.get_audio(entry_id)
     if audio is None:
-        gr.Warning("Audio not found for this entry.")
+        gr.Warning(S.HIST_AUDIO_MISSING_WARN)
         return None
     return audio
 
@@ -57,40 +58,40 @@ def history_preview(ctx, entry_id):
 def history_delete(ctx, entry_id):
     """Delete a single history entry."""
     if not entry_id or entry_id == "(empty)":
-        return history_table_md(ctx), "Select an entry first"
+        return history_table_md(ctx), S.HIST_SELECT_FIRST
     ctx.history.delete_entry(entry_id)
-    return history_table_md(ctx), f"Deleted entry {entry_id}"
+    return history_table_md(ctx), S.HIST_DELETED.format(entry_id=entry_id)
 
 
 def history_clear(ctx):
     """Clear all history."""
     ctx.history.clear()
-    return history_table_md(ctx), "History cleared"
+    return history_table_md(ctx), S.HIST_CLEARED
 
 
 def history_save_audio(ctx, entry_id):
     """Save a history entry's audio to the output directory."""
     if not entry_id or entry_id == "(empty)":
-        return "Select an entry first"
+        return S.HIST_SELECT_FIRST
     audio = ctx.history.get_audio(entry_id)
     if audio is None:
-        return "Audio not found"
+        return S.HIST_AUDIO_NOT_FOUND
     return save_audio(ctx, audio, "history")
 
 
 def history_regenerate(ctx, entry_id):
     """Get params from a history entry for regeneration."""
     if not entry_id or entry_id == "(empty)":
-        return "Select an entry first"
+        return S.HIST_SELECT_FIRST
     entry = ctx.history.get_entry(entry_id)
     if entry is None:
-        return "Entry not found"
+        return S.HIST_NOT_FOUND
     parts = [
         f"Mode: {entry.mode.replace('_', ' ').title()}",
         f"Language: {entry.language}",
     ]
     if entry.speaker:
-        parts.append(f"Speaker: {entry.speaker}")
+        parts.append(f"Voice: {entry.speaker}")
     if entry.voice_params:
         parts.append(f"Params: {entry.voice_params}")
     parts.append(f"Text: {entry.text}")
