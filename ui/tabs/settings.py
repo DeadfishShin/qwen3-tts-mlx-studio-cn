@@ -316,13 +316,11 @@ def wire(ctx, ui):
         msg = f"Settings applied — {', '.join(parts)}."
         lang_update = gr.update(value=default_language)
         if default_language == LANGUAGE_AUTO:
-            # ASR uses its own "Auto" convention; library import has no auto option.
-            asr_update = gr.update(value="Auto")
+            # library import has no auto option (a saved voice has a concrete language)
             lib_update = gr.update()
         else:
-            asr_update = lang_update
             lib_update = lang_update
-        return msg, msg, lang_update, lang_update, lang_update, lang_update, asr_update, lib_update
+        return msg, msg, lang_update, lang_update, lang_update, lang_update, lang_update, lib_update
 
     def unload_model():
         ctx.engine.unload_model()

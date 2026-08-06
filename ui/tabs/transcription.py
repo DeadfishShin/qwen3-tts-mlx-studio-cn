@@ -6,7 +6,7 @@ from datetime import datetime
 import gradio as gr
 
 from config import LANGUAGES
-from generation import stream_transcription
+from generation import api_language, stream_transcription
 from ui import strings as S
 from ui.components import wire_run_lifecycle, wire_stop
 
@@ -28,8 +28,8 @@ def build(ctx):
                 )
                 with gr.Row():
                     asr_language = gr.Dropdown(
-                        choices=["Auto"] + LANGUAGES,
-                        value="Auto",
+                        choices=[S.LANGUAGE_AUTO] + LANGUAGES,
+                        value=S.LANGUAGE_AUTO,
                         label=S.LANGUAGE,
                     )
                 with gr.Row():
@@ -68,8 +68,7 @@ def transcribe_audio(ctx, audio_path, language):
         gr.Warning("Upload or record audio first.")
         yield gr.update(), "No audio"
         return
-    lang = "auto" if language == "Auto" else language
-    yield from stream_transcription(ctx, audio_path, lang)
+    yield from stream_transcription(ctx, audio_path, api_language(language))
 
 
 def save_transcript(ctx, text):
