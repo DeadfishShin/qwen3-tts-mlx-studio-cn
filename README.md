@@ -18,23 +18,32 @@ If you don't have Homebrew yet, open Terminal and paste:
 
 ## Tabs
 
-**Custom Voice** — Generate speech with one of nine built-in speaker presets. Add a style instruction to shape tone, pace, and emotion. Supports batch generation for long texts.
+**Custom Voice** — Generate speech with one of nine built-in voices. Add style instructions to shape tone, pace, and emotion. Supports batch generation for long texts.
 
 **Voice Design** — Describe a voice in plain language and the model creates it. Designed voices can be saved to the Voice Library. Supports batch generation.
 
-**Voice Cloning** — Clone a voice from a short reference audio clip (3-30 seconds). Provide the clip and an exact transcript of what was spoken. A "Transcribe Reference" button can auto-fill the transcript using the built-in ASR model. Reference clips are auto-trimmed of leading/trailing silence (Silero VAD, toggleable) and can optionally be denoised. Batch generation runs as true batched inference sharing the reference.
+**Voice Clone** — Clone a voice from a short reference audio clip (3-30 seconds). Provide the clip and a reference transcript of exactly what was spoken — the "Transcribe Reference" button can auto-fill it using on-device speech recognition. Reference clips are auto-trimmed of leading/trailing silence (toggleable) and can optionally be denoised. Batch generation runs as true batched inference sharing the reference.
 
 **YT Voice Clone** — Clone a voice directly from a YouTube video. Paste a URL, select a timestamp range, and the transcript auto-fills from subtitles. A "Transcribe Clip" button is available when subtitles are missing or inaccurate. Clips are cached in `.yt_cache/`.
 
-**Script Mode** — Write multi-speaker scripts with `SPEAKER: Dialogue` formatting and assign a different voice to each speaker. Lines are batched by model type to minimise swaps (cloned speakers batch their lines against a shared reference), then stitched together with configurable silence gaps.
+**Script Mode** — Write multi-speaker scripts with `SPEAKER: Dialogue` formatting and assign a different voice to each speaker. Lines are batched by voice type to minimise model swaps (cloned speakers batch their lines against a shared reference), then stitched together with configurable silence gaps.
 
-**Transcription** — Transcribe audio files locally using the Qwen3-ASR model. Upload a file or record with your microphone, pick a language (or leave it on Auto), and get a text transcript. Supports up to ~20 minutes of audio. Transcriptions can be saved as `.txt` files.
+**Transcription** — Transcribe audio files locally. Upload a file or record with your microphone, pick a language (or leave it on Auto-detect), and watch the transcript stream in live. Supports up to ~20 minutes of audio. Transcripts can be saved as `.txt` files.
 
-**Voice Library** — Browse, preview, rename, delete, and import saved voices. Voices from Voice Design, Voice Cloning, and YT Voice Clone all appear here.
+**Voice Library** — Browse, preview, rename, delete, and import saved voices. Voices from Voice Design, Voice Clone, and YT Voice Clone all appear here.
 
-**History** — Every generation is logged with mode, language, text, and duration. Replay audio, save files, or view original parameters.
+**History** — Every completed generation is logged with mode, language, text, and duration. Replay audio, save files, or view the generation settings that produced a take.
 
-**Settings** — Model size and quantization, generation parameters (temperature, top-k, top-p, repetition penalty, max tokens, timeout), batch size (segments processed in parallel in batch and script modes, including voice cloning), output directory, auto-save toggle, export format (WAV/MP3/OGG) with MP3 bitrate selector, post-processing (EBU R128 loudness normalization, silence trimming, reference audio denoising via DeepFilterNet), JIT compilation toggle, ASR model management, YT cache management, and model cache management (view/delete downloaded models).
+**Settings** — Model size and quantization; generation controls with plain-language tooltips (temperature, top-k, top-p, repetition penalty, max length, auto-stop timeout); batch size; output folder and auto-save; export format (WAV/MP3/OGG) with MP3 bitrate; post-processing (normalize loudness, trim silence, reduce reference background noise); "speed up repeat runs" compilation toggle; speech-recognition, YT-cache, and model-cache management (view/delete downloaded models).
+
+## While it generates
+
+Generation is never a black box:
+
+- A live status shows seconds of audio generated as it runs ("Generating… 12.4s"); batch runs show "Segment k/N", Script Mode shows "Line k/N".
+- Every generating tab has a **Stop** button. Stopping keeps the audio generated so far in the player — you can listen to it and save it manually, but partial takes are not auto-saved and don't enter History.
+- The **auto-stop timeout** (Settings) ends a runaway generation the same way, keeping the partial audio. Number-heavy text (dates, scientific notation, acronym lists) is the usual culprit for runaways.
+- Transcription streams its text live on all three entry points (Transcription tab, "Transcribe Reference", "Transcribe Clip"), with the same Stop support.
 
 ## Setup
 
@@ -92,7 +101,7 @@ Three model variants, one per generation mode. Only one is loaded at a time (~6 
 |---|---|---|
 | Custom Voice | CustomVoice | `mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16` |
 | Voice Design | VoiceDesign | `mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16` |
-| Voice Cloning | Base | `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` |
+| Voice Clone | Base | `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` |
 
 All three variants are available in `bf16`, `8bit`, `6bit`, and `4bit` quantizations. Select in Settings or via `--quant`.
 
@@ -120,7 +129,7 @@ Replace `bf16` with `8bit`, `6bit`, or `4bit` for smaller models.
 
 ## Output
 
-Audio is generated at 24 kHz mono and saved to `./outputs/` by default. Supported export formats are WAV (32-bit float), MP3 (configurable bitrate), and OGG/Vorbis — selectable in Settings. Optional post-processing includes EBU R128 loudness normalization and leading/trailing silence trimming (both via ffmpeg). Reference audio for voice cloning can optionally be denoised with DeepFilterNet (toggle in Settings). Transcriptions are saved as `.txt` files in the same directory. Voice library profiles are stored in `./voices/`.
+Audio is generated at 24 kHz mono and saved to `./outputs/` by default. Supported export formats are WAV (32-bit float), MP3 (configurable bitrate), and OGG/Vorbis — selectable in Settings. Optional post-processing includes loudness normalization (EBU R128) and leading/trailing silence trimming (both via ffmpeg). Reference audio for Voice Clone can optionally be denoised with DeepFilterNet (toggle in Settings). Transcripts are saved as `.txt` files in the same directory. Voice library profiles are stored in `./voices/`.
 
 ## Supported Languages
 
@@ -130,7 +139,7 @@ Auto-detect (default), or explicitly: English, Chinese, Japanese, Korean, German
 
 ```
 app.py            — Entrypoint: CLI args, startup checks, UI assembly
-generation.py     — Shared generation pipeline (validation, timeout, history, autosave)
+generation.py     — Shared pipeline (validation, live progress, Stop/auto-stop, history, autosave)
 engine.py         — Model load/unload/inference (thread-safe, TTS + ASR)
 state.py          — Runtime settings (AppSettings) and app context
 ui/
@@ -159,6 +168,8 @@ run.sh            — App launcher
 **Out of memory** — The 1.7B bf16 model uses ~6 GB of unified memory. If you're running low, try `./run.sh --model-size 0.6B` or `./run.sh --quant 4bit` for the smallest footprint.
 
 **ffmpeg not found** — Install it with `brew install ffmpeg`. It's required for audio processing and YouTube clip extraction.
+
+**Generation runs away on number-heavy text** — Dates, scientific notation, and acronym lists can make the model keep talking far past the end of your text. Press **Stop**; it keeps the audio generated so far. The auto-stop timeout in Settings does the same automatically, and lowering "Max length (tokens)" caps the damage entirely.
 
 ## License
 
