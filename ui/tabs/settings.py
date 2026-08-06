@@ -16,6 +16,7 @@ from config import (
     OUTPUT_DIR, VOICE_LIBRARY_DIR, YT_CACHE_DIR,
 )
 from generation import get_hf_cache_dir
+from ui import strings as S
 
 
 GENERATION_PRESETS = {
@@ -131,6 +132,7 @@ def build(ctx):
                 set_timeout = gr.Slider(
                     30, 300, value=DEFAULT_TIMEOUT, step=10,
                     label="Generation Timeout (seconds)",
+                    info=S.TIMEOUT_SLIDER_INFO,
                 )
                 set_batch_size = gr.Slider(
                     MIN_BATCH_SIZE, MAX_BATCH_SIZE,

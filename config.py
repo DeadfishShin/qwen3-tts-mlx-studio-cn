@@ -62,6 +62,13 @@ DEFAULT_REPETITION_PENALTY = 1.05
 DEFAULT_MAX_TOKENS = 4096
 DEFAULT_TIMEOUT = 120
 
+# Streaming decode (Stage 3) — generation is consumed in chunks internally so
+# Stop/timeout can land between chunks; this sets the cancel latency (seconds
+# of audio per chunk). Live playback of these chunks was removed: it needs
+# faster-than-real-time generation, which this app's low-end-hardware target
+# doesn't have.
+STREAMING_INTERVAL_S = 1.0
+
 # Output defaults
 DEFAULT_AUTOSAVE = False
 DEFAULT_EXPORT_FORMAT = "wav"    # "wav", "mp3", "ogg"

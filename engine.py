@@ -165,6 +165,72 @@ class TTSEngine:
             self._cleanup_temps(temps)
             self._release_lock()
 
+    def stream_generate_custom_voice(self, text, speaker, language, instruct="",
+                                     streaming_interval=2.0, **kwargs):
+        """Yield (sample_rate, numpy_chunk) as audio is decoded.
+
+        Holds the engine lock until the generator is exhausted or closed —
+        consumers must close() it promptly when abandoning mid-stream.
+        """
+        self._acquire_lock()
+        try:
+            self._load_model("custom_voice")
+            inner = self.current_model.generate_custom_voice(
+                text=text, speaker=speaker, language=language, instruct=instruct,
+                stream=True, streaming_interval=streaming_interval, **kwargs,
+            )
+            try:
+                for result in inner:
+                    yield self._to_numpy(result)
+            finally:
+                inner.close()
+                gc.collect()
+        finally:
+            self._release_lock()
+
+    def stream_generate_voice_design(self, text, language, instruct,
+                                     streaming_interval=2.0, **kwargs):
+        """Yield (sample_rate, numpy_chunk) as audio is decoded (see stream_generate_custom_voice)."""
+        self._acquire_lock()
+        try:
+            self._load_model("voice_design")
+            inner = self.current_model.generate_voice_design(
+                text=text, language=language, instruct=instruct,
+                stream=True, streaming_interval=streaming_interval, **kwargs,
+            )
+            try:
+                for result in inner:
+                    yield self._to_numpy(result)
+            finally:
+                inner.close()
+                gc.collect()
+        finally:
+            self._release_lock()
+
+    def stream_generate_voice_clone(self, text, ref_audio_path, ref_text,
+                                    language="English", denoise_ref=False,
+                                    trim_ref=False, streaming_interval=2.0, **kwargs):
+        """Yield (sample_rate, numpy_chunk) as audio is decoded (see stream_generate_custom_voice)."""
+        self._acquire_lock()
+        temps = []
+        try:
+            ref_audio_path, temps = self._prepare_ref(ref_audio_path, trim_ref, denoise_ref)
+            self._load_model("base")
+            inner = self.current_model.generate(
+                text=text, ref_audio=ref_audio_path, ref_text=ref_text,
+                language=language,
+                stream=True, streaming_interval=streaming_interval, **kwargs,
+            )
+            try:
+                for result in inner:
+                    yield self._to_numpy(result)
+            finally:
+                inner.close()
+                gc.collect()
+        finally:
+            self._cleanup_temps(temps)
+            self._release_lock()
+
     def batch_generate_voice_clone(self, texts, ref_audio_path, ref_text,
                                    language="English", denoise_ref=False,
                                    trim_ref=False, **kwargs):
@@ -281,6 +347,32 @@ class TTSEngine:
             self._load_asr()
             result = self.asr_model.generate(audio_path, language=language)
             return result.text
+        finally:
+            self._unload_asr_unlocked()
+            self._release_lock()
+
+    def stream_transcribe(self, audio_path, language="auto"):
+        """Yield transcript text deltas. Loads/unloads ASR automatically.
+
+        Holds the engine lock until the generator is exhausted or closed.
+        Upstream auto-detects only when language is None ("auto" would be
+        injected into the prompt as a literal language name).
+        """
+        self._acquire_lock()
+        try:
+            self._load_asr()
+            lang = None if not language or language.lower() == "auto" else language
+            inner = self.asr_model.generate(audio_path, language=lang, stream=True)
+            try:
+                for piece in inner:
+                    text = getattr(piece, "text", None)
+                    if text is None:
+                        text = str(piece)
+                    if text:
+                        yield text
+            finally:
+                if hasattr(inner, "close"):
+                    inner.close()
         finally:
             self._unload_asr_unlocked()
             self._release_lock()

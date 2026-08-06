@@ -1,3 +1,4 @@
+import threading
 from dataclasses import dataclass, field
 from typing import Any, List
 
@@ -50,3 +51,6 @@ class AppContext:
     yt: Any
     settings: AppSettings
     startup_warnings: List[str] = field(default_factory=list)
+    # One shared cooperative-cancel flag: the engine lock serializes runs, so a
+    # single event is enough. Runners clear it at start; Stop buttons set it.
+    cancel_event: threading.Event = field(default_factory=threading.Event)

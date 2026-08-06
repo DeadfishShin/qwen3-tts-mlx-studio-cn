@@ -6,7 +6,9 @@ from datetime import datetime
 import gradio as gr
 
 from config import LANGUAGES
+from generation import stream_transcription
 from ui import strings as S
+from ui.components import wire_run_lifecycle, wire_stop
 
 
 def build(ctx):
@@ -30,7 +32,9 @@ def build(ctx):
                         value="Auto",
                         label=S.LANGUAGE,
                     )
-                asr_transcribe_btn = gr.Button("Transcribe", variant="primary")
+                with gr.Row():
+                    asr_transcribe_btn = gr.Button("Transcribe", variant="primary")
+                    asr_stop_btn = gr.Button(S.STOP, variant="stop", visible=False)
                 asr_output = gr.Textbox(
                     label="Transcription",
                     lines=12,
@@ -51,28 +55,21 @@ def build(ctx):
                 )
     return types.SimpleNamespace(
         asr_audio=asr_audio, asr_language=asr_language,
-        asr_transcribe_btn=asr_transcribe_btn, asr_output=asr_output,
+        asr_transcribe_btn=asr_transcribe_btn, asr_stop_btn=asr_stop_btn,
+        asr_output=asr_output,
         asr_save_btn=asr_save_btn, asr_save_status=asr_save_status,
         asr_info=asr_info,
     )
 
 
 def transcribe_audio(ctx, audio_path, language):
-    """Standalone transcription handler."""
+    """Standalone transcription handler — streams tokens into the textbox."""
     if not audio_path:
         gr.Warning("Upload or record audio first.")
-        return gr.update(), "No audio"
+        yield gr.update(), "No audio"
+        return
     lang = "auto" if language == "Auto" else language
-    yield gr.update(), "Loading ASR model..."
-    try:
-        text = ctx.engine.transcribe(audio_path, language=lang)
-        if not text or not text.strip():
-            yield gr.update(), "Transcription returned empty"
-            return
-        yield gr.update(value=text.strip()), f"Transcribed ({len(text.strip().split())} words)"
-    except Exception as e:
-        gr.Warning(f"Transcription failed: {e}")
-        yield gr.update(), f"Error: {e}"
+    yield from stream_transcription(ctx, audio_path, lang)
 
 
 def save_transcript(ctx, text):
@@ -95,11 +92,11 @@ def wire(ctx, ui):
     def on_transcribe(audio_path, language):
         yield from transcribe_audio(ctx, audio_path, language)
 
-    t.asr_transcribe_btn.click(
-        fn=on_transcribe,
+    wire_stop(ctx, t.asr_stop_btn, ui.status)
+    wire_run_lifecycle(
+        t.asr_transcribe_btn, t.asr_stop_btn, on_transcribe,
         inputs=[t.asr_audio, t.asr_language],
         outputs=[t.asr_output, ui.status],
-        show_progress="minimal",
     )
     t.asr_save_btn.click(
         fn=lambda text: save_transcript(ctx, text),

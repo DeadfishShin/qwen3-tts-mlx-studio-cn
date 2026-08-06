@@ -1,9 +1,8 @@
-"""Shared generation pipeline: validation, timeout, engine calls, history, autosave.
+"""Shared generation pipeline: validation, cancel/timeout, engine calls, history, autosave.
 
 All tab handlers route generation through this module; it is the only caller
 of the engine's generate methods.
 """
-import concurrent.futures
 import os
 import time
 from dataclasses import dataclass
@@ -11,24 +10,83 @@ from datetime import datetime
 from typing import Callable, Optional
 
 import gradio as gr
+import numpy as np
 
 from audio_utils import concatenate_audio, export_audio, split_text
-from config import LANGUAGE_AUTO, MAX_BATCH_SEGMENTS
+from config import LANGUAGE_AUTO, MAX_BATCH_SEGMENTS, STREAMING_INTERVAL_S
+from ui import strings as S
 
 
 class GenerationTimeout(Exception):
     pass
 
 
-def generate_with_timeout(func, *func_args, timeout_seconds=120, **func_kwargs):
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(func, *func_args, **func_kwargs)
-        try:
-            return future.result(timeout=timeout_seconds)
-        except concurrent.futures.TimeoutError:
-            raise GenerationTimeout(
-                "Generation timed out — try shorter text or lower max_new_tokens"
-            )
+class GenerationCancelled(Exception):
+    pass
+
+
+def stream_to_audio(ctx, stream):
+    """Drain an engine streaming generator into one (sr, audio) array.
+
+    Cancel and timeout are checked between chunks — abandoning the generator
+    is the only way to interrupt generation (the old thread-pool timeout could
+    not). The timeout clock starts at the first chunk so a first-run model
+    download doesn't count against it. Does NOT clear the cancel event; run
+    boundaries own that.
+    """
+    sr, parts, first_chunk_at = None, [], None
+    try:
+        for csr, chunk in stream:
+            sr = csr
+            parts.append(chunk)
+            now = time.monotonic()
+            if first_chunk_at is None:
+                first_chunk_at = now
+            if ctx.cancel_event.is_set():
+                raise GenerationCancelled()
+            if now - first_chunk_at > ctx.settings.timeout:
+                raise GenerationTimeout(S.TIMEOUT_MSG)
+    finally:
+        stream.close()
+    if not parts:
+        raise RuntimeError("no audio produced")
+    return sr, np.concatenate(parts)
+
+
+def generate_once(ctx, req):
+    """Blocking single generation via the streaming path (cancel/timeout aware)."""
+    spec = MODES[req.mode]
+    return stream_to_audio(ctx, spec.call_stream(ctx, req, **ctx.settings.gen_kwargs()))
+
+
+def stream_transcription(ctx, audio_path, language):
+    """Stream ASR text into a textbox. Yields (textbox_update, status).
+
+    Cancel is checked between token deltas; a stopped run keeps the partial
+    transcript in the textbox.
+    """
+    ctx.cancel_event.clear()
+    yield gr.skip(), S.ASR_LOADING
+    text = ""
+    stream = ctx.engine.stream_transcribe(audio_path, language=language)
+    try:
+        for delta in stream:
+            text += delta
+            words = len(text.split())
+            yield gr.update(value=text.strip()), S.TRANSCRIBING.format(words=words)
+            if ctx.cancel_event.is_set():
+                yield gr.update(value=text.strip()), S.TRANSCRIBE_STOPPED
+                return
+    except Exception as e:
+        gr.Warning(f"Transcription failed: {e}")
+        yield gr.skip(), f"Error: {e}"
+        return
+    finally:
+        stream.close()
+    if not text.strip():
+        yield gr.skip(), "Transcription returned empty"
+        return
+    yield gr.update(value=text.strip()), f"Transcribed ({len(text.split())} words)"
 
 
 def save_audio(ctx, audio_tuple, prefix="output"):
@@ -197,7 +255,7 @@ class ModeSpec:
     save_prefix: str
     validate: Callable              # (ctx, req) -> error string | None
     prepare: Callable               # (ctx, req) -> (req | None, error string | None)
-    call_single: Callable           # (ctx, req, **gen_kwargs) -> (sr, audio)
+    call_stream: Callable           # (ctx, req, **gen_kwargs) -> iterator of (sr, chunk)
     history_kwargs: Callable        # (req) -> dict of extra history.add fields
     status_extras: Callable         # (ctx) -> str appended to success status
     batch_prepare: Callable         # (ctx, req) -> (req | None, (table_rows, error) | None)
@@ -210,8 +268,9 @@ MODES = {
         model_type="custom_voice", save_prefix="custom",
         validate=_validate_common,
         prepare=_no_prepare,
-        call_single=lambda ctx, req, **kw: ctx.engine.generate_custom_voice(
-            req.text, req.speaker, api_language(req.language), req.instruct, **kw),
+        call_stream=lambda ctx, req, **kw: ctx.engine.stream_generate_custom_voice(
+            req.text, req.speaker, api_language(req.language), req.instruct,
+            streaming_interval=STREAMING_INTERVAL_S, **kw),
         history_kwargs=lambda req: dict(
             speaker=req.speaker,
             voice_params=req.instruct if req.instruct else ""),
@@ -226,8 +285,9 @@ MODES = {
         model_type="voice_design", save_prefix="design",
         validate=_validate_design,
         prepare=_no_prepare,
-        call_single=lambda ctx, req, **kw: ctx.engine.generate_voice_design(
-            req.text, api_language(req.language), req.instruct, **kw),
+        call_stream=lambda ctx, req, **kw: ctx.engine.stream_generate_voice_design(
+            req.text, api_language(req.language), req.instruct,
+            streaming_interval=STREAMING_INTERVAL_S, **kw),
         history_kwargs=lambda req: dict(voice_params=req.instruct),
         status_extras=_no_extras,
         batch_prepare=_batch_prepare_design,
@@ -240,9 +300,10 @@ MODES = {
         model_type="base", save_prefix="clone",
         validate=_validate_common,
         prepare=_prepare_clone,
-        call_single=lambda ctx, req, **kw: ctx.engine.generate_voice_clone(
+        call_stream=lambda ctx, req, **kw: ctx.engine.stream_generate_voice_clone(
             req.text, req.ref_audio, req.ref_text, api_language(req.language),
-            denoise_ref=ctx.settings.denoise_ref, trim_ref=req.trim_ref, **kw),
+            denoise_ref=ctx.settings.denoise_ref, trim_ref=req.trim_ref,
+            streaming_interval=STREAMING_INTERVAL_S, **kw),
         history_kwargs=lambda req: dict(
             voice_params=f"ref: {_clone_voice_info(req)}"),
         status_extras=_clone_extras,
@@ -257,44 +318,76 @@ MODES = {
 
 
 def run_single(ctx, req):
-    """Shared single-generation pipeline. Yields (audio_update, status_text)."""
+    """Shared single-generation pipeline.
+
+    Yields (audio_update, status). Generation still runs through the engine's
+    streaming generator internally — that is what makes the live "Generating…
+    Xs" status and cooperative Stop/timeout possible — but the player only
+    receives the complete waveform at the end (live chunk playback proved
+    unusable on hardware where generation is slower than real-time).
+    """
     spec = MODES[req.mode]
     err = spec.validate(ctx, req)
     if err:
-        yield None, err
+        yield gr.skip(), err
         return
     req, err = spec.prepare(ctx, req)
     if err:
-        yield None, err
+        yield gr.skip(), err
         return
     msg = loading_status(ctx, spec.model_type)
     if msg:
-        yield None, msg
+        yield gr.skip(), msg
+
+    ctx.cancel_event.clear()
+    sr, parts = None, []
+    start = time.monotonic()
+    first_chunk_at = None
+    stopped = timed_out = False
+    stream = spec.call_stream(ctx, req, **ctx.settings.gen_kwargs())
     try:
-        start = time.time()
-        sr, audio = generate_with_timeout(
-            spec.call_single, ctx, req,
-            timeout_seconds=ctx.settings.timeout,
-            **ctx.settings.gen_kwargs(),
-        )
-        elapsed = time.time() - start
-        result = (sr, audio)
-        ctx.history.add(mode=req.mode, text=req.text, language=req.language,
-                        audio=result, **spec.history_kwargs(req))
-        save_msg = ""
-        if ctx.settings.autosave:
-            save_msg = " | " + save_audio(ctx, result, spec.save_prefix)
-        yield (
-            gr.update(value=result),
-            f"Generated in {elapsed:.1f}s | Model: "
-            f"{ctx.engine.get_repo_id(spec.model_type)}{spec.status_extras(ctx)}{save_msg}",
-        )
-    except GenerationTimeout as e:
-        gr.Warning(str(e))
-        yield None, str(e)
+        for csr, chunk in stream:
+            sr = csr
+            parts.append(chunk)
+            now = time.monotonic()
+            if first_chunk_at is None:
+                first_chunk_at = now
+            secs = sum(len(p) for p in parts) / sr
+            yield gr.skip(), S.GENERATING_STATUS.format(secs=secs)
+            if ctx.cancel_event.is_set():
+                stopped = True
+                break
+            if now - first_chunk_at > ctx.settings.timeout:
+                timed_out = True
+                break
     except Exception as e:
         gr.Warning(f"Generation failed: {e}")
-        yield None, f"Error: {e}"
+        yield gr.skip(), f"Error: {e}"
+        return
+    finally:
+        stream.close()
+
+    if not parts:
+        yield gr.skip(), "No audio produced"
+        return
+    result = (sr, np.concatenate(parts))
+    secs = len(result[1]) / sr
+    if stopped or timed_out:
+        # Partial takes are for immediate listening/manual save only:
+        # no history entry, no autosave.
+        status = (S.TIMED_OUT_KEPT.format(timeout=ctx.settings.timeout, secs=secs)
+                  if timed_out else S.STOPPED_KEPT.format(secs=secs))
+        yield result, status
+        return
+    elapsed = time.monotonic() - start
+    ctx.history.add(mode=req.mode, text=req.text, language=req.language,
+                    audio=result, **spec.history_kwargs(req))
+    save_msg = ""
+    if ctx.settings.autosave:
+        save_msg = " | " + save_audio(ctx, result, spec.save_prefix)
+    yield result, (
+        f"Generated in {elapsed:.1f}s | Model: "
+        f"{ctx.engine.get_repo_id(spec.model_type)}{spec.status_extras(ctx)}{save_msg}")
 
 
 def _segment_preview(seg):
@@ -302,53 +395,70 @@ def _segment_preview(seg):
 
 
 def run_batch(ctx, req, split_mode, silence_ms, progress):
-    """Shared batch pipeline. Returns (audio_update, table_rows, status_msg)."""
+    """Shared batch pipeline. Generator yielding (audio_update, table_rows, status).
+
+    Batched engine calls stay blocking (continuous-batching throughput);
+    cancel is checked between batch calls and between fallback retries.
+    Fallback retries go through stream_to_audio, so they are cancel- and
+    timeout-aware per chunk. On cancel, completed segments are combined but
+    NOT recorded to history.
+    """
     from dataclasses import replace
 
     spec = MODES[req.mode]
     req, err_pack = spec.batch_prepare(ctx, req)
     if err_pack:
         rows, msg = err_pack
-        return None, rows, msg
+        yield None, rows, msg
+        return
     segments = split_text(req.text, split_mode)
     if not segments:
         gr.Warning("No text segments found.")
-        return None, [["(empty)", "", ""]], "No segments"
+        yield None, [["(empty)", "", ""]], "No segments"
+        return
     if len(segments) > MAX_BATCH_SEGMENTS:
         gr.Warning(f"Too many segments ({len(segments)}). Max is {MAX_BATCH_SEGMENTS}.")
-        return None, [["(error)", "", ""]], f"Too many segments (max {MAX_BATCH_SEGMENTS})"
+        yield None, [["(error)", "", ""]], f"Too many segments (max {MAX_BATCH_SEGMENTS})"
+        return
 
+    ctx.cancel_event.clear()
     batch_size = ctx.settings.batch_size
     audio_parts = []
     table_rows = []
     succeeded, failed = 0, 0
+    cancelled = False
     total = len(segments)
 
     def run_one(idx, seg):
-        nonlocal succeeded, failed
+        nonlocal succeeded, failed, cancelled
         preview = _segment_preview(seg)
         try:
-            sr, audio = generate_with_timeout(
-                spec.call_single, ctx, replace(req, text=seg),
-                timeout_seconds=ctx.settings.timeout,
-                **ctx.settings.gen_kwargs(),
-            )
+            sr, audio = stream_to_audio(
+                ctx, spec.call_stream(ctx, replace(req, text=seg),
+                                      **ctx.settings.gen_kwargs()))
             audio_parts.append((sr, audio))
             table_rows.append([str(idx + 1), preview, f"{len(audio) / sr:.1f}s"])
             succeeded += 1
+        except GenerationCancelled:
+            table_rows.append([str(idx + 1), preview, "Stopped"])
+            cancelled = True
         except Exception as e:
             table_rows.append([str(idx + 1), preview, f"Failed: {e}"])
             failed += 1
 
+    def progress_status():
+        secs = sum(len(a) / s for s, a in audio_parts)
+        return S.BATCH_SEGMENT_PROGRESS.format(
+            done=succeeded + failed, total=total, secs=secs)
+
     for batch_start in range(0, total, batch_size):
+        if cancelled or ctx.cancel_event.is_set():
+            cancelled = True
+            break
         batch_segs = segments[batch_start:batch_start + batch_size]
         batch_indices = list(range(batch_start, batch_start + len(batch_segs)))
         try:
-            results = generate_with_timeout(
-                spec.call_batch, ctx, batch_segs, req,
-                timeout_seconds=ctx.settings.timeout,
-                **ctx.settings.gen_kwargs(),
-            )
+            results = spec.call_batch(ctx, batch_segs, req, **ctx.settings.gen_kwargs())
             for j, (sr, audio) in enumerate(results):
                 idx = batch_indices[j]
                 audio_parts.append((sr, audio))
@@ -356,16 +466,26 @@ def run_batch(ctx, req, split_mode, silence_ms, progress):
                     [str(idx + 1), _segment_preview(batch_segs[j]), f"{len(audio) / sr:.1f}s"])
                 succeeded += 1
                 progress((batch_start + j + 1) / total, desc="Generating segments")
+            yield gr.skip(), list(table_rows), progress_status()
         except Exception:
             # Batch failed — retry each segment individually
             for j, seg in enumerate(batch_segs):
+                if cancelled or ctx.cancel_event.is_set():
+                    cancelled = True
+                    break
                 run_one(batch_indices[j], seg)
                 progress((batch_start + j + 1) / total, desc="Generating segments")
+                yield gr.skip(), list(table_rows), progress_status()
 
     if not audio_parts:
-        return None, table_rows, "All segments failed"
+        yield None, table_rows, ("Stopped" if cancelled else "All segments failed")
+        return
 
     combined = concatenate_audio(audio_parts, silence_ms=int(silence_ms))
+    if cancelled:
+        yield gr.update(value=combined), table_rows, S.BATCH_STOPPED.format(
+            done=succeeded, total=total)
+        return
     ctx.history.add(
         mode=req.mode, text=f"[Batch: {succeeded} segments]",
         language=req.language, audio=combined,
@@ -375,4 +495,4 @@ def run_batch(ctx, req, split_mode, silence_ms, progress):
     if failed:
         status_msg += f" ({failed} failed)"
     status_msg += spec.status_extras(ctx)
-    return gr.update(value=combined), table_rows, status_msg
+    yield gr.update(value=combined), table_rows, status_msg

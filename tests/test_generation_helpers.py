@@ -1,12 +1,11 @@
 import os
-import time
 
 import numpy as np
 import pytest
 
 from state import AppContext, AppSettings
 from generation import (
-    GenerationTimeout, generate_with_timeout, save_audio,
+    GenerationCancelled, GenerationTimeout, save_audio, stream_to_audio,
     is_model_cached, loading_status,
 )
 
@@ -18,13 +17,28 @@ def make_ctx(fake_engine, fake_history, tmp_path):
                       yt=None, settings=s)
 
 
-def test_timeout_raises():
+def test_stream_to_audio_concatenates(fake_engine, fake_history, tmp_path):
+    ctx = make_ctx(fake_engine, fake_history, tmp_path)
+    sr, audio = stream_to_audio(
+        ctx, fake_engine.stream_generate_custom_voice("hi", "ryan", "English"))
+    assert sr == fake_engine.sr
+    assert len(audio) == 3 * int(sr * 0.5)          # 3 fake chunks of 0.5 s
+
+
+def test_stream_to_audio_cancel(fake_engine, fake_history, tmp_path):
+    ctx = make_ctx(fake_engine, fake_history, tmp_path)
+    fake_engine.chunk_hook = lambda i: ctx.cancel_event.set() if i == 1 else None
+    with pytest.raises(GenerationCancelled):
+        stream_to_audio(
+            ctx, fake_engine.stream_generate_custom_voice("hi", "ryan", "English"))
+
+
+def test_stream_to_audio_timeout(fake_engine, fake_history, tmp_path):
+    ctx = make_ctx(fake_engine, fake_history, tmp_path)
+    ctx.settings.timeout = 0                        # any elapsed time > 0 trips it
     with pytest.raises(GenerationTimeout):
-        generate_with_timeout(time.sleep, 2, timeout_seconds=0.2)
-
-
-def test_timeout_passes_result():
-    assert generate_with_timeout(lambda: 42, timeout_seconds=5) == 42
+        stream_to_audio(
+            ctx, fake_engine.stream_generate_custom_voice("hi", "ryan", "English"))
 
 
 def test_save_audio_writes_wav(fake_engine, fake_history, tmp_path):

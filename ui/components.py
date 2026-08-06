@@ -83,16 +83,38 @@ def build_batch_accordion():
 
 
 def build_output_column():
-    """The right-hand output column shared by the three generation tabs."""
+    """The right-hand output column shared by the three generation tabs.
+
+    A regular (non-streaming) player: waveform view, smooth playback. The
+    complete or Stop-kept-partial waveform lands here when the run ends.
+    """
     with gr.Column(scale=1, elem_classes=["output-col"]):
         audio = gr.Audio(label=S.OUTPUT, type="numpy", interactive=False, buttons=["download"])
+        stop = gr.Button(S.STOP, variant="stop", visible=False)
         save = gr.Button(S.SAVE_AUDIO)
         save_status = gr.Textbox(
             show_label=False, interactive=False,
             placeholder=S.SAVE_PATH_PLACEHOLDER,
             elem_classes=["save-status-text"],
         )
-    return types.SimpleNamespace(audio=audio, save=save, save_status=save_status)
+    return types.SimpleNamespace(audio=audio, stop=stop, save=save, save_status=save_status)
+
+
+def wire_run_lifecycle(start_btn, stop_btn, fn, inputs, outputs, show_progress="minimal"):
+    """start → (disable start, show stop) → run fn → restore. Stop wiring is separate."""
+    begin = start_btn.click(
+        fn=lambda: (gr.update(interactive=False), gr.update(visible=True)),
+        outputs=[start_btn, stop_btn], queue=False)
+    run = begin.then(fn=fn, inputs=inputs, outputs=outputs, show_progress=show_progress)
+    run.then(fn=lambda: (gr.update(interactive=True), gr.update(visible=False)),
+             outputs=[start_btn, stop_btn], queue=False)
+    return run
+
+
+def wire_stop(ctx, stop_btn, status_out):
+    """A Stop click sets the shared cancel event; runners notice between chunks."""
+    stop_btn.click(fn=lambda: (ctx.cancel_event.set(), S.STOPPING)[1],
+                   outputs=[status_out], queue=False)
 
 
 def build_lib_save_accordion(name_placeholder):

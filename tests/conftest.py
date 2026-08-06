@@ -20,6 +20,9 @@ class FakeEngine:
         self.current_model = None
         self.current_model_type = None
         self.calls = []                          # (method, args) log
+        self.n_chunks = 3                        # chunks per fake stream
+        self.chunk_secs = 0.5                    # audio seconds per chunk
+        self.chunk_hook = None                   # callable(i) before yielding chunk i
 
     def _audio(self, seconds=0.5):
         return (self.sr, np.zeros(int(self.sr * seconds), dtype=np.float32))
@@ -51,6 +54,34 @@ class FakeEngine:
             raise RuntimeError("fake single failure")
         self.current_model_type = "base"
         return self._audio()
+
+    def _stream(self, mode, model_type):
+        if mode in self.fail_modes:
+            raise RuntimeError("fake single failure")
+        self.current_model_type = model_type
+        for i in range(self.n_chunks):
+            if self.chunk_hook:
+                self.chunk_hook(i)
+            yield (self.sr, np.zeros(int(self.sr * self.chunk_secs), dtype=np.float32))
+
+    def stream_generate_custom_voice(self, text, speaker, language, instruct="", **kw):
+        self.calls.append(("stream_generate_custom_voice", text, language))
+        yield from self._stream("custom_voice", "custom_voice")
+
+    def stream_generate_voice_design(self, text, language, instruct, **kw):
+        self.calls.append(("stream_generate_voice_design", text, language))
+        yield from self._stream("voice_design", "voice_design")
+
+    def stream_generate_voice_clone(self, text, ref_audio_path, ref_text,
+                                    language="English", denoise_ref=False,
+                                    trim_ref=False, **kw):
+        self.calls.append(("stream_generate_voice_clone", text, language))
+        yield from self._stream("voice_clone", "base")
+
+    def stream_transcribe(self, audio_path, language="auto"):
+        self.calls.append(("stream_transcribe", audio_path))
+        yield "fake "
+        yield "transcript"
 
     def batch_generate_voice_clone(self, texts, ref_audio_path, ref_text,
                                    language="English", denoise_ref=False,

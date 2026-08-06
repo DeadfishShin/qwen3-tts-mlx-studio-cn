@@ -21,3 +21,11 @@ def test_context_holds_parts(fake_engine, fake_history):
     ctx = AppContext(engine=fake_engine, library=None, history=fake_history,
                      yt=None, settings=AppSettings(), startup_warnings=[])
     assert ctx.engine is fake_engine
+
+
+def test_context_has_cancel_event(fake_engine, fake_history):
+    ctx = AppContext(engine=fake_engine, library=None, history=fake_history,
+                     yt=None, settings=AppSettings())
+    assert not ctx.cancel_event.is_set()
+    ctx.cancel_event.set()
+    assert ctx.cancel_event.is_set()

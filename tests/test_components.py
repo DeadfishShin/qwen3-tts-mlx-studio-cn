@@ -17,3 +17,12 @@ def test_format_table_md_escapes_pipes():
 
 def test_format_table_md_empty():
     assert format_table_md(["A"], [], "*empty*") == "*empty*"
+
+
+def test_output_column_constructs_with_stop():
+    import gradio as gr
+    from ui.components import build_output_column
+    with gr.Blocks():
+        out = build_output_column()
+    assert out.audio.streaming is False           # regular player: waveform + smooth playback
+    assert out.stop is not None
