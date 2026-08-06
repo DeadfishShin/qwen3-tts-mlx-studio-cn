@@ -20,7 +20,7 @@ def build(ctx):
         with gr.Row():
             with gr.Column(scale=2):
                 vd_text = gr.Textbox(
-                    label=S.VD_TEXT_LABEL,
+                    label=S.TEXT_TO_SPEAK,
                     lines=5,
                     placeholder=S.TEXT_PLACEHOLDER,
                 )

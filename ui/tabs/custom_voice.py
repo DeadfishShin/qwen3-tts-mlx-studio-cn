@@ -16,7 +16,7 @@ def build(ctx):
         with gr.Row():
             with gr.Column(scale=2):
                 cv_text = gr.Textbox(
-                    label=S.CV_TEXT_LABEL,
+                    label=S.TEXT_TO_SPEAK,
                     lines=5,
                     placeholder=S.TEXT_PLACEHOLDER,
                 )

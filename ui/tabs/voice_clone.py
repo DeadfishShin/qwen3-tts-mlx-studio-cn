@@ -43,9 +43,9 @@ def build(ctx):
                     placeholder=S.VC_REF_TEXT_PLACEHOLDER,
                 )
                 vc_text = gr.Textbox(
-                    label=S.VC_TEXT_LABEL,
+                    label=S.TEXT_TO_SPEAK,
                     lines=5,
-                    placeholder=S.VC_TEXT_PLACEHOLDER,
+                    placeholder=S.TEXT_PLACEHOLDER,
                 )
                 vc_generate = gr.Button(S.GENERATE, variant="primary")
                 lib = build_lib_save_accordion(S.VC_LIB_NAME_PLACEHOLDER)
