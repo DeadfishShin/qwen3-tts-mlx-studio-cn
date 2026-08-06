@@ -28,174 +28,180 @@ GENERATION_PRESETS = {
 
 def get_model_status(ctx):
     if ctx.engine.current_model is None:
-        return "No model loaded"
+        return S.SET_NO_MODEL
     repo = ctx.engine.get_repo_id(ctx.engine.current_model_type)
-    return f"Loaded: {repo}"
+    return S.SET_MODEL_LOADED.format(repo=repo)
 
 
 def build(ctx):
-    with gr.Tab("Settings"):
+    with gr.Tab(S.TAB_SETTINGS):
         with gr.Row():
             # --- Column 1: Model & Language ---
             with gr.Column(scale=1):
-                gr.Markdown("### Model")
+                gr.Markdown(S.SET_MODEL_HEADER)
                 set_size = gr.Radio(
                     ["0.6B", "1.7B"],
                     value=ctx.engine.model_size,
-                    label="Model Size",
+                    label=S.SET_MODEL_SIZE,
                 )
                 set_quant = gr.Radio(
                     ["4bit", "6bit", "8bit", "bf16"],
                     value=ctx.engine.quantization,
-                    label="Quantization",
+                    label=S.SET_QUANT,
+                    info=S.SET_QUANT_INFO,
                 )
                 set_status = gr.Textbox(
-                    label="Loaded Model",
+                    label=S.SET_LOADED_MODEL,
                     value=get_model_status(ctx),
                     interactive=False,
                     elem_classes=["model-status"],
                 )
-                set_unload = gr.Button("Unload Model / Free RAM")
-                gr.Markdown("### Reference Audio")
+                set_unload = gr.Button(S.SET_UNLOAD)
+                gr.Markdown(S.SET_REF_HEADER)
                 set_denoise_ref = gr.Checkbox(
                     value=DEFAULT_DENOISE_REF,
-                    label="Denoise reference audio (DeepFilterNet, 8MB model)",
-                    info="Pre-processes voice clone references to remove background noise",
+                    label=S.SET_DENOISE,
+                    info=S.SET_DENOISE_INFO,
                 )
-                gr.Markdown("### Language")
+                gr.Markdown(S.SET_LANGUAGE_HEADER)
                 set_default_language = gr.Dropdown(
                     choices=[LANGUAGE_AUTO] + LANGUAGES,
                     value=LANGUAGE_AUTO,
-                    label="Default Language",
+                    label=S.SET_DEFAULT_LANGUAGE,
                 )
                 set_jit = gr.Checkbox(
                     value=ENABLE_JIT_COMPILE,
-                    label="JIT compile model (faster after first run; unloads model on change)",
-                    container=False,
+                    label=S.SET_JIT,
+                    info=S.SET_JIT_INFO,
                 )
-                with gr.Accordion("Model Cache & ASR", open=False, elem_classes=["settings-accordion"]):
-                    gr.Markdown("### Model Cache")
+                with gr.Accordion(S.SET_CACHE_ACCORDION, open=False, elem_classes=["settings-accordion"]):
+                    gr.Markdown(S.SET_CACHE_HEADER)
                     gr.Textbox(
-                        label="HuggingFace Cache Directory",
+                        label=S.SET_CACHE_DIR,
                         value=os.path.abspath(get_hf_cache_dir()),
                         interactive=False,
                         elem_classes=["model-status"],
                     )
                     set_delete_models = gr.Button(
-                        "Delete Downloaded Models",
+                        S.SET_DELETE_MODELS,
                         variant="stop",
                     )
                     set_delete_status = gr.Textbox(
                         show_label=False, interactive=False,
-                        placeholder="Models will be re-downloaded on next use.",
+                        placeholder=S.SET_DELETE_PLACEHOLDER,
                         elem_classes=["save-status-text"],
                     )
-                    gr.Markdown("### Speech Recognition")
+                    gr.Markdown(S.SET_ASR_HEADER)
                     set_asr_status = gr.Textbox(
-                        label="ASR Model",
-                        value="Not loaded (loads on demand)",
+                        label=S.SET_ASR_STATUS,
+                        value=S.SET_ASR_NOT_LOADED,
                         interactive=False,
                         elem_classes=["model-status"],
                     )
-                    set_asr_unload = gr.Button("Unload ASR Model")
+                    set_asr_unload = gr.Button(S.SET_ASR_UNLOAD)
 
             # --- Column 2: Generation ---
             with gr.Column(scale=1):
-                gr.Markdown("### Generation")
+                gr.Markdown(S.SET_GENERATION_HEADER)
                 set_preset = gr.Radio(
                     ["Balanced", "Creative", "Precise", "Custom"],
                     value="Balanced",
-                    label="Generation Presets",
-                    info="Presets fill sliders below. Adjust freely afterward.",
+                    label=S.SET_PRESET,
+                    info=S.SET_PRESET_INFO,
                 )
                 set_temperature = gr.Slider(
                     0.0, 1.5, value=DEFAULT_TEMPERATURE, step=0.05,
-                    label="Temperature",
+                    label=S.SET_TEMP,
+                    info=S.SET_TEMP_INFO,
                 )
                 set_top_k = gr.Slider(
                     0, 100, value=DEFAULT_TOP_K, step=1,
-                    label="Top-K",
+                    label=S.SET_TOP_K,
+                    info=S.SET_TOP_K_INFO,
                 )
                 set_top_p = gr.Slider(
                     0.0, 1.0, value=DEFAULT_TOP_P, step=0.05,
-                    label="Top-P",
+                    label=S.SET_TOP_P,
+                    info=S.SET_TOP_P_INFO,
                 )
                 set_rep_penalty = gr.Slider(
                     1.0, 2.0, value=DEFAULT_REPETITION_PENALTY, step=0.05,
-                    label="Repetition Penalty",
-                    info="Voice cloning always uses at least 1.5",
+                    label=S.SET_REP_PENALTY,
+                    info=S.SET_REP_PENALTY_INFO,
                 )
                 set_max_tokens = gr.Slider(
                     512, 8192, value=DEFAULT_MAX_TOKENS, step=256,
-                    label="Max Tokens",
+                    label=S.SET_MAX_TOKENS,
+                    info=S.SET_MAX_TOKENS_INFO,
                 )
                 set_timeout = gr.Slider(
                     30, 300, value=DEFAULT_TIMEOUT, step=10,
-                    label="Generation Timeout (seconds)",
+                    label=S.SET_TIMEOUT,
                     info=S.TIMEOUT_SLIDER_INFO,
                 )
                 set_batch_size = gr.Slider(
                     MIN_BATCH_SIZE, MAX_BATCH_SIZE,
                     value=DEFAULT_BATCH_SIZE, step=1,
-                    label="Batch Size",
-                    info="Segments processed in parallel (Custom Voice & Voice Design batch/script modes)",
+                    label=S.SET_BATCH_SIZE,
+                    info=S.SET_BATCH_SIZE_INFO,
                 )
-                set_reset = gr.Button("Reset to Defaults")
+                set_reset = gr.Button(S.SET_RESET)
 
             # --- Column 3: Output ---
             with gr.Column(scale=1):
-                gr.Markdown("### Output")
+                gr.Markdown(S.SET_OUTPUT_HEADER)
                 set_output_dir = gr.Textbox(
                     value=OUTPUT_DIR,
-                    label="Output Directory",
+                    label=S.SET_OUTPUT_DIR,
                 )
                 set_autosave = gr.Checkbox(
                     value=DEFAULT_AUTOSAVE,
-                    label="Auto-save generated audio",
+                    label=S.SET_AUTOSAVE,
                 )
-                gr.Markdown("### Export Format")
+                gr.Markdown(S.SET_EXPORT_HEADER)
                 set_export_format = gr.Radio(
                     ["wav", "mp3", "ogg"],
                     value=DEFAULT_EXPORT_FORMAT,
-                    label="Audio Format",
+                    label=S.SET_EXPORT_FORMAT,
                 )
                 set_mp3_bitrate = gr.Slider(
                     64, 320, value=DEFAULT_MP3_BITRATE, step=32,
-                    label="MP3 Bitrate (kbps)",
+                    label=S.SET_MP3_BITRATE,
                     visible=False,
                 )
-                gr.Markdown("### Post-Processing")
+                gr.Markdown(S.SET_POST_HEADER)
                 set_loudnorm = gr.Checkbox(
                     value=DEFAULT_LOUDNORM,
-                    label="EBU R128 loudness normalization",
+                    label=S.SET_LOUDNORM,
+                    info=S.SET_LOUDNORM_INFO,
                 )
                 set_trim_silence = gr.Checkbox(
                     value=DEFAULT_TRIM_SILENCE,
-                    label="Trim leading/trailing silence",
+                    label=S.SET_TRIM_SILENCE,
                 )
-                with gr.Accordion("Storage & Cache", open=False, elem_classes=["settings-accordion"]):
-                    gr.Markdown("### YT Cache")
-                    set_yt_cache_btn = gr.Button("Clear YT Cache")
+                with gr.Accordion(S.SET_STORAGE_ACCORDION, open=False, elem_classes=["settings-accordion"]):
+                    gr.Markdown(S.SET_YT_CACHE_HEADER)
+                    set_yt_cache_btn = gr.Button(S.SET_YT_CACHE_CLEAR)
                     set_yt_cache_status = gr.Textbox(
                         show_label=False, interactive=False,
-                        placeholder=f"Cache: {YT_CACHE_DIR}/",
+                        placeholder=S.SET_YT_CACHE_PLACEHOLDER.format(cache_dir=YT_CACHE_DIR),
                         elem_classes=["save-status-text"],
                     )
-                    gr.Markdown("### Storage Paths")
+                    gr.Markdown(S.SET_STORAGE_HEADER)
                     gr.Textbox(
-                        label="Voice Library",
+                        label=S.SET_STORAGE_LIBRARY,
                         value=os.path.abspath(VOICE_LIBRARY_DIR),
                         interactive=False,
                         elem_classes=["model-status"],
                     )
                     gr.Textbox(
-                        label="History",
+                        label=S.SET_STORAGE_HISTORY,
                         value=os.path.abspath(HISTORY_DIR),
                         interactive=False,
                         elem_classes=["model-status"],
                     )
 
-        set_apply = gr.Button("Apply Settings", variant="primary")
+        set_apply = gr.Button(S.SET_APPLY, variant="primary")
     return types.SimpleNamespace(
         set_size=set_size, set_quant=set_quant, set_status=set_status,
         set_unload=set_unload, set_denoise_ref=set_denoise_ref,
@@ -245,7 +251,7 @@ def delete_cached_models(ctx):
     ctx.engine.unload_model()
     hf_cache = get_hf_cache_dir()
     if not os.path.isdir(hf_cache):
-        return "HuggingFace cache directory not found", "No model loaded"
+        return S.SET_CACHE_DIR_MISSING, S.SET_NO_MODEL
     deleted = []
     failed = []
     for entry in os.listdir(hf_cache):
@@ -259,12 +265,12 @@ def delete_cached_models(ctx):
                     failed.append(f"{entry.replace('models--mlx-community--', '')}: {e}")
     parts = []
     if deleted:
-        parts.append(f"Deleted {len(deleted)} model(s): {', '.join(deleted)}")
+        parts.append(S.SET_DELETED_MODELS.format(n=len(deleted), names=", ".join(deleted)))
     if failed:
-        parts.append(f"Failed to delete {len(failed)}: {'; '.join(failed)}")
+        parts.append(S.SET_DELETE_FAILED.format(n=len(failed), details="; ".join(failed)))
     if parts:
-        return " | ".join(parts), "No model loaded"
-    return "No Qwen3-TTS models found in cache", "No model loaded"
+        return " | ".join(parts), S.SET_NO_MODEL
+    return S.SET_NO_MODELS_FOUND, S.SET_NO_MODEL
 
 
 def wire(ctx, ui):
@@ -310,10 +316,10 @@ def wire(ctx, ui):
 
         os.makedirs(s.output_dir, exist_ok=True)
 
-        parts = [f"size: {model_size}, quant: {quantization}"]
+        parts = [S.SET_APPLIED_SIZE_QUANT.format(size=model_size, quant=quantization)]
         if model_changed:
-            parts.append("model unloaded")
-        msg = f"Settings applied — {', '.join(parts)}."
+            parts.append(S.SET_APPLIED_UNLOADED)
+        msg = S.SET_APPLIED.format(details=", ".join(parts))
         lang_update = gr.update(value=default_language)
         if default_language == LANGUAGE_AUTO:
             # library import has no auto option (a saved voice has a concrete language)
@@ -324,15 +330,15 @@ def wire(ctx, ui):
 
     def unload_model():
         ctx.engine.unload_model()
-        return "Model unloaded. RAM freed.", "Not loaded (loads on demand)"
+        return S.SET_UNLOADED_MSG, S.SET_ASR_NOT_LOADED
 
     def unload_asr_setting():
         ctx.engine.unload_asr()
-        return "ASR unloaded. RAM freed."
+        return S.SET_ASR_UNLOADED_MSG
 
     def clear_yt_cache():
         n = ctx.yt.clear_cache()
-        return f"YT cache cleared — {n} entr{'y' if n == 1 else 'ies'} removed"
+        return S.SET_YT_CACHE_CLEARED.format(n=n, plural="y" if n == 1 else "ies")
 
     t.set_export_format.change(
         fn=lambda fmt: gr.update(visible=(fmt == "mp3")),
