@@ -15,88 +15,81 @@ from ui.tabs.voice_clone import save_clone_to_library
 
 
 def build(ctx):
-    with gr.Tab("YT Voice Clone"):
-        gr.HTML(
-            "<div class='info-notice'>"
-            "Clone any voice from YouTube: fetch a video, pick a timestamp range, "
-            "auto-extract the clip with aligned transcript, then generate."
-            "</div>"
-        )
+    with gr.Tab(S.TAB_YT):
+        gr.HTML(S.YT_NOTICE_HTML)
         yt_video_state = gr.State({"id": None, "title": None, "duration": None})
 
         with gr.Row():
             # Left column — step-by-step controls
             with gr.Column(scale=3):
-                gr.Markdown("**Step 1 — Video URL**", elem_classes=["yt-step"])
+                gr.Markdown(S.YT_STEP_1, elem_classes=["yt-step"])
                 yt_url = gr.Textbox(
-                    label="YouTube URL",
-                    placeholder="https://www.youtube.com/watch?v=...",
+                    placeholder=S.YT_URL_PLACEHOLDER,
                     show_label=False,
                 )
-                yt_fetch_btn = gr.Button("Fetch Video Info", variant="secondary")
+                yt_fetch_btn = gr.Button(S.YT_FETCH, variant="secondary")
 
-                gr.Markdown("**Step 2 — Select Clip**", elem_classes=["yt-step"])
+                gr.Markdown(S.YT_STEP_2, elem_classes=["yt-step"])
                 with gr.Row():
                     yt_start = gr.Textbox(
-                        label="Start Time (mm:ss)", placeholder="blank = beginning", scale=1
+                        label=S.YT_START, placeholder=S.YT_START_PLACEHOLDER, scale=1
                     )
                     yt_end = gr.Textbox(
-                        label="End Time (mm:ss)", placeholder="blank = end of video", scale=1
+                        label=S.YT_END, placeholder=S.YT_END_PLACEHOLDER, scale=1
                     )
-                yt_extract_btn = gr.Button("Extract Clip", variant="primary")
+                yt_extract_btn = gr.Button(S.YT_EXTRACT, variant="primary")
                 yt_trim_ref = gr.Checkbox(
-                    value=True, label="Trim silence from reference (recommended)"
+                    value=True, label=S.TRIM_REF_LABEL
                 )
 
-                gr.Markdown("**Step 3 — Review Transcript**", elem_classes=["yt-step"])
+                gr.Markdown(S.YT_STEP_3, elem_classes=["yt-step"])
                 yt_transcript = gr.Textbox(
-                    label="Reference Transcript (auto-filled from subtitles — edit if needed)",
+                    label=S.YT_TRANSCRIPT,
+                    info=S.YT_TRANSCRIPT_INFO,
                     lines=3,
-                    placeholder="Transcript appears here after extraction, or enter manually…",
+                    placeholder=S.YT_TRANSCRIPT_PLACEHOLDER,
                 )
                 with gr.Row():
-                    yt_transcribe_btn = gr.Button("Transcribe Clip", variant="secondary")
+                    yt_transcribe_btn = gr.Button(S.YT_TRANSCRIBE, variant="secondary")
                     yt_stop_btn = gr.Button(S.STOP, variant="stop", visible=False)
-                gr.HTML("<div class='text-hint'>Use ASR when subtitles are unavailable or inaccurate</div>")
+                gr.HTML(S.YT_TRANSCRIBE_HINT_HTML)
 
-                gr.Markdown("**Step 4 — Generate & Save**", elem_classes=["yt-step"])
+                gr.Markdown(S.YT_STEP_4, elem_classes=["yt-step"])
                 yt_text = gr.Textbox(
-                    label="Text to Synthesize",
+                    label=S.TEXT_TO_SPEAK,
                     lines=4,
-                    placeholder="Enter text to speak in the cloned voice…",
+                    placeholder=S.TEXT_PLACEHOLDER,
                 )
                 with gr.Row():
                     yt_language = gr.Dropdown(
                         choices=[LANGUAGE_AUTO] + LANGUAGES,
-                        value=LANGUAGE_AUTO, label="Language", scale=1
+                        value=LANGUAGE_AUTO, label=S.LANGUAGE, scale=1
                     )
                     yt_voice_name = gr.Textbox(
-                        label="Voice Name (saved to library)",
-                        placeholder="yt_speaker",
+                        label=S.YT_VOICE_NAME,
+                        placeholder=S.YT_VOICE_NAME_PLACEHOLDER,
                         scale=2,
                     )
-                yt_clone_btn = gr.Button("Clone & Save to Library", variant="primary")
+                yt_clone_btn = gr.Button(S.YT_CLONE, variant="primary")
 
             # Right column — preview + output panel
             with gr.Column(scale=1, elem_classes=["output-col"]):
                 yt_thumbnail = gr.Image(
-                    label="Video Thumbnail",
+                    label=S.YT_THUMBNAIL,
                     height=180,
                 )
-                yt_video_info = gr.Markdown(
-                    "_Video info appears here after fetching._"
-                )
+                yt_video_info = gr.Markdown(S.YT_INFO_EMPTY)
                 yt_clip_audio = gr.Audio(
-                    label="Reference Clip Preview",
+                    label=S.YT_CLIP_PREVIEW,
                     type="filepath",
                     interactive=False,
                     buttons=["download"],
                 )
                 yt_audio_out = gr.Audio(
-                    label="Generated Audio", type="numpy", interactive=False, buttons=["download"]
+                    label=S.OUTPUT, type="numpy", interactive=False, buttons=["download"]
                 )
                 yt_status = gr.Textbox(
-                    label="Status", interactive=False, elem_classes=["save-status-text"]
+                    label=S.YT_STATUS, interactive=False, elem_classes=["save-status-text"]
                 )
     return types.SimpleNamespace(
         yt_video_state=yt_video_state, yt_url=yt_url, yt_fetch_btn=yt_fetch_btn,
@@ -113,7 +106,7 @@ def build(ctx):
 
 def fetch_yt_info(ctx, url):
     if not url or not url.strip():
-        return gr.update(), "_Enter a URL above._", {}, "Enter a YouTube URL"
+        return gr.update(), S.YT_ENTER_URL_MD, {}, S.YT_ENTER_URL
     try:
         info = ctx.yt.fetch_info(url.strip())
         dur = info.get("duration") or 0
@@ -121,11 +114,11 @@ def fetch_yt_info(ctx, url):
         m, s = divmod(rem, 60)
         dur_str = f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
         if info.get("has_manual_subs"):
-            sub_note = "Manual subtitles"
+            sub_note = S.YT_SUBS_MANUAL
         elif info.get("has_auto_subs"):
-            sub_note = "Auto-generated subtitles (may need editing)"
+            sub_note = S.YT_SUBS_AUTO
         else:
-            sub_note = "No subtitles — enter transcript manually"
+            sub_note = S.YT_SUBS_NONE
         md = (
             f"**{info['title']}**\n\n"
             f"Duration: {dur_str}  |  {sub_note}"
@@ -141,7 +134,7 @@ def fetch_yt_info(ctx, url):
             gr.update(value=info.get("thumbnail") or None),
             md,
             state,
-            f"✓ Fetched: {info['title'][:60]}",
+            S.YT_FETCHED.format(title=info["title"][:60]),
         )
     except (ValueError, RuntimeError) as e:
         gr.Warning(str(e))
@@ -153,9 +146,9 @@ def fetch_yt_info(ctx, url):
 
 def extract_yt_clip(ctx, url, start_str, end_str, video_state, progress=gr.Progress()):
     if not url or not url.strip():
-        return gr.update(), gr.update(), "Enter a YouTube URL first"
+        return gr.update(), gr.update(), S.YT_ENTER_URL
     if not video_state or not video_state.get("id"):
-        return gr.update(), gr.update(), "Fetch video info first (Step 1)"
+        return gr.update(), gr.update(), S.YT_FETCH_FIRST
 
     vid_dur = video_state.get("duration")
 
@@ -164,68 +157,68 @@ def extract_yt_clip(ctx, url, start_str, end_str, video_state, progress=gr.Progr
         start_sec = ctx.yt.parse_timestamp(start_str or "0")
     except ValueError as e:
         gr.Warning(str(e))
-        return gr.update(), gr.update(), f"Bad start time: {e}"
+        return gr.update(), gr.update(), S.YT_BAD_START.format(err=e)
 
     # Resolve end — blank defaults to video duration (or full video)
     if not end_str or not end_str.strip():
         if not vid_dur:
-            gr.Warning("Enter an end time — video duration unknown.")
-            return gr.update(), gr.update(), "Enter an end time"
+            gr.Warning(S.YT_ENTER_END_WARN)
+            return gr.update(), gr.update(), S.YT_ENTER_END
         end_sec = float(vid_dur)
     else:
         try:
             end_sec = ctx.yt.parse_timestamp(end_str)
         except ValueError:
-            gr.Warning("Invalid end time — use mm:ss")
-            return gr.update(), gr.update(), "Enter a valid end time"
+            gr.Warning(S.YT_BAD_END_WARN)
+            return gr.update(), gr.update(), S.YT_BAD_END
 
     if end_sec <= start_sec:
-        gr.Warning("End time must be after start time.")
-        return gr.update(), gr.update(), "End must be after start"
+        gr.Warning(S.YT_END_BEFORE_START_WARN)
+        return gr.update(), gr.update(), S.YT_END_BEFORE_START
 
     clip_dur = end_sec - start_sec
     if clip_dur < 3.0:
-        gr.Warning("Clip must be at least 3 seconds.")
-        return gr.update(), gr.update(), "Clip too short (min 3 s)"
+        gr.Warning(S.YT_CLIP_TOO_SHORT_WARN)
+        return gr.update(), gr.update(), S.YT_CLIP_TOO_SHORT
     if clip_dur > 60.0:
-        gr.Warning("Clip capped at 60 seconds.")
+        gr.Warning(S.YT_CLIP_CAPPED_WARN)
         end_sec = start_sec + 60.0
         clip_dur = 60.0
     elif clip_dur > 30.0:
-        gr.Warning(f"Clip is {clip_dur:.0f}s — 5-20 s gives best clone quality.")
+        gr.Warning(S.YT_CLIP_LONG_WARN.format(secs=clip_dur))
 
     if vid_dur and end_sec > vid_dur + 1:
-        gr.Warning(f"End time exceeds video duration ({vid_dur:.0f}s).")
-        return gr.update(), gr.update(), "End time beyond video end"
+        gr.Warning(S.YT_END_BEYOND_WARN.format(secs=vid_dur))
+        return gr.update(), gr.update(), S.YT_END_BEYOND
 
     video_id = video_state["id"]
 
     try:
-        progress(0.0, desc="Starting…")
+        progress(0.0, desc=S.YT_EXTRACT_PROGRESS_START)
         wav_path, _ = ctx.yt.download_clip(
             url.strip(), video_id, start_sec, end_sec,
             progress_cb=lambda f, d: progress(f, desc=d),
         )
-        progress(0.90, desc="Extracting transcript…")
+        progress(0.90, desc=S.YT_EXTRACT_PROGRESS_TRANSCRIPT)
         transcript = ctx.yt.extract_transcript(video_id, start_sec, end_sec)
-        progress(1.0, desc="Done")
+        progress(1.0, desc=S.YT_EXTRACT_PROGRESS_DONE)
 
-        note = "transcript auto-filled" if transcript else "no subtitles — enter transcript manually"
+        note = S.YT_TRANSCRIPT_FILLED if transcript else S.YT_SUBS_NONE
         return (
             gr.update(value=wav_path),
             gr.update(value=transcript),
-            f"✓ {clip_dur:.1f}s clip extracted — {note}",
+            S.YT_EXTRACTED.format(secs=clip_dur, note=note),
         )
     except Exception as e:
-        gr.Warning(f"Extraction failed: {e}")
+        gr.Warning(S.YT_EXTRACT_FAILED.format(err=e))
         return gr.update(), gr.update(), f"Error: {e}"
 
 
 def transcribe_yt_clip(ctx, clip_audio):
     """Transcribe extracted YT clip audio (streams live)."""
     if not clip_audio:
-        gr.Warning("Extract a clip first (Step 2).")
-        yield gr.update(), "No clip to transcribe"
+        gr.Warning(S.YT_NO_CLIP_WARN)
+        yield gr.update(), S.YT_NO_CLIP
         return
     yield from stream_transcription(ctx, clip_audio, "auto")
 
@@ -233,15 +226,15 @@ def transcribe_yt_clip(ctx, clip_audio):
 def clone_yt_voice(ctx, text, ref_audio, transcript, language, voice_name, trim_ref=True):
     errors = []
     if not text or not text.strip():
-        errors.append("text to synthesize")
+        errors.append(S.YT_REQ_TEXT)
     if not ref_audio:
-        errors.append("reference clip (extract one first)")
+        errors.append(S.YT_REQ_CLIP)
     if not transcript or not transcript.strip():
-        errors.append("reference transcript")
+        errors.append(S.YT_REQ_TRANSCRIPT)
     if not voice_name or not voice_name.strip():
-        errors.append("voice name")
+        errors.append(S.YT_REQ_NAME)
     if errors:
-        msg = "Required: " + ", ".join(errors)
+        msg = S.YT_REQUIRED.format(items=", ".join(errors))
         gr.Warning(msg)
         return gr.update(), msg, msg, gr.update(), gr.update()
 
@@ -270,12 +263,12 @@ def clone_yt_voice(ctx, text, ref_audio, transcript, language, voice_name, trim_
         return (
             gr.update(value=result),
             status_msg,
-            f"✓ {lib_msg}",
+            S.YT_SAVED_OK.format(msg=lib_msg),
             gr.update(choices=voice_choices(ctx)),
             gr.update(value=voice_table(ctx)),
         )
     except GenerationCancelled:
-        return gr.update(), "Stopped", "Stopped", gr.update(), gr.update()
+        return gr.update(), S.YT_STOPPED, S.YT_STOPPED, gr.update(), gr.update()
     except GenerationTimeout as e:
         gr.Warning(str(e))
         return gr.update(), str(e), str(e), gr.update(), gr.update()

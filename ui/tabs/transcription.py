@@ -13,16 +13,11 @@ from ui.components import wire_run_lifecycle, wire_stop
 
 def build(ctx):
     with gr.Tab(S.TAB_TRANSCRIPTION):
-        gr.HTML(
-            "<div class='info-notice'>"
-            "Transcribe audio files locally using Qwen3-ASR. "
-            "Supports up to ~20 minutes of audio."
-            "</div>"
-        )
+        gr.HTML(S.ASR_NOTICE_HTML)
         with gr.Row():
             with gr.Column(scale=2):
                 asr_audio = gr.Audio(
-                    label="Upload Audio",
+                    label=S.ASR_AUDIO,
                     type="filepath",
                     sources=["upload", "microphone"],
                 )
@@ -33,26 +28,21 @@ def build(ctx):
                         label=S.LANGUAGE,
                     )
                 with gr.Row():
-                    asr_transcribe_btn = gr.Button("Transcribe", variant="primary")
+                    asr_transcribe_btn = gr.Button(S.ASR_TRANSCRIBE, variant="primary")
                     asr_stop_btn = gr.Button(S.STOP, variant="stop", visible=False)
                 asr_output = gr.Textbox(
-                    label="Transcription",
+                    label=S.ASR_OUTPUT,
                     lines=12,
                 )
                 with gr.Row():
-                    asr_save_btn = gr.Button("Save as .txt")
+                    asr_save_btn = gr.Button(S.ASR_SAVE_TXT)
                     asr_save_status = gr.Textbox(
                         show_label=False, interactive=False,
-                        placeholder="Save path appears here...",
+                        placeholder=S.ASR_SAVE_PLACEHOLDER,
                         elem_classes=["save-status-text"],
                     )
             with gr.Column(scale=1, elem_classes=["output-col"]):
-                asr_info = gr.Markdown(
-                    "**Model:** Qwen3-ASR-1.7B-8bit\n\n"
-                    "**Supported languages:** Auto-detect, English, Chinese, Japanese, Korean, "
-                    "German, French, Russian, Portuguese, Spanish, Italian\n\n"
-                    "**Max duration:** ~20 minutes per file"
-                )
+                asr_info = gr.Markdown(S.ASR_INFO_MD)
     return types.SimpleNamespace(
         asr_audio=asr_audio, asr_language=asr_language,
         asr_transcribe_btn=asr_transcribe_btn, asr_stop_btn=asr_stop_btn,
@@ -65,8 +55,8 @@ def build(ctx):
 def transcribe_audio(ctx, audio_path, language):
     """Standalone transcription handler — streams tokens into the textbox."""
     if not audio_path:
-        gr.Warning("Upload or record audio first.")
-        yield gr.update(), "No audio"
+        gr.Warning(S.ASR_NO_AUDIO_WARN)
+        yield gr.update(), S.ASR_NO_AUDIO
         return
     yield from stream_transcription(ctx, audio_path, api_language(language))
 
@@ -74,15 +64,15 @@ def transcribe_audio(ctx, audio_path, language):
 def save_transcript(ctx, text):
     """Save transcription text to .txt file."""
     if not text or not text.strip():
-        gr.Warning("No transcription to save.")
-        return "Nothing to save"
+        gr.Warning(S.ASR_NOTHING_TO_SAVE_WARN)
+        return S.ASR_NOTHING_TO_SAVE
     out_dir = ctx.settings.output_dir
     os.makedirs(out_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     path = os.path.join(out_dir, f"transcript_{timestamp}.txt")
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
-    return f"Saved: {path}"
+    return S.ASR_SAVED.format(path=path)
 
 
 def wire(ctx, ui):

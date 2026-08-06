@@ -14,37 +14,28 @@ from ui.components import format_table_md, voice_choices, wire_run_lifecycle, wi
 
 
 def build(ctx):
-    with gr.Tab("Script Mode") as script_tab:
-        gr.HTML(
-            "<div class='info-notice'>"
-            "<strong>Multi-Speaker Script</strong> &nbsp;—&nbsp; "
-            "Each line: <code>SPEAKER: Dialogue text</code> &nbsp; Lines without a label are narration."
-            "</div>"
-        )
+    with gr.Tab(S.TAB_SCRIPT) as script_tab:
+        gr.HTML(S.SM_NOTICE_HTML)
         with gr.Row():
             with gr.Column(scale=2):
                 sm_script = gr.Textbox(
-                    label="Script",
+                    label=S.SM_SCRIPT,
                     lines=10,
-                    placeholder=(
-                        "NARRATOR: Once upon a time, there lived a curious inventor.\n"
-                        "EMMA: Father, look what I found in the attic!\n"
-                        "FATHER: That is something I built a long time ago."
-                    ),
+                    placeholder=S.SM_SCRIPT_PLACEHOLDER,
                     elem_classes=["script-editor"],
                 )
                 with gr.Row():
-                    sm_parse_btn = gr.Button("Parse Script", variant="primary", scale=1)
+                    sm_parse_btn = gr.Button(S.SM_PARSE, variant="primary", scale=1)
                     sm_silence = gr.Slider(
                         0, 2000, value=DEFAULT_SCRIPT_SILENCE_MS, step=50,
-                        label="Silence Between Lines (ms)", scale=2,
+                        label=S.SM_SILENCE, scale=2,
                     )
-                sm_parse_status = gr.Textbox(label="Parse Result", interactive=False, lines=2)
+                sm_parse_status = gr.Textbox(label=S.SM_PARSE_RESULT, interactive=False, lines=2)
 
                 # Voice assignment state
                 sm_assignments = gr.State({})
 
-                gr.Markdown("### Voice Assignments")
+                gr.Markdown(S.SM_ASSIGNMENTS_HEADER)
                 # Pre-allocate speaker slots (show/hide based on parse)
                 sm_speaker_groups = []
                 sm_speaker_modes = []
@@ -60,48 +51,48 @@ def build(ctx):
                             mode = gr.Radio(
                                 ["Custom Voice", "Voice Design", "Voice Clone"],
                                 value="Custom Voice",
-                                label=f"Speaker {i+1} Mode",
+                                label=S.SM_SLOT_MODE.format(n=i + 1),
                                 scale=2,
                             )
                             sm_speaker_modes.append(mode)
                             lang = gr.Dropdown(
                                 choices=[LANGUAGE_AUTO] + LANGUAGES,
                                 value=LANGUAGE_AUTO,
-                                label="Language", scale=1,
+                                label=S.LANGUAGE, scale=1,
                             )
                             sm_speaker_languages.append(lang)
                         with gr.Row():
                             spk = gr.Dropdown(
                                 choices=DEFAULT_SPEAKERS,
                                 value=DEFAULT_SPEAKERS[0],
-                                label="Speaker",
+                                label=S.CV_SPEAKER,
                                 scale=1,
                             )
                             sm_speaker_speakers.append(spk)
                             inst = gr.Textbox(
-                                label="Instruct / Description",
-                                placeholder="Style instruction or voice description",
+                                label=S.SM_SLOT_INSTRUCT,
+                                placeholder=S.SM_SLOT_INSTRUCT_PLACEHOLDER,
                                 scale=2,
                             )
                             sm_speaker_instructs.append(inst)
                             lib_v = gr.Dropdown(
                                 choices=voice_choices(ctx),
                                 value="None",
-                                label="Library Voice",
+                                label=S.SM_SLOT_LIBRARY,
                                 scale=1,
                             )
                             sm_speaker_lib_voices.append(lib_v)
 
                 with gr.Row():
-                    sm_generate_btn = gr.Button("Generate Script", variant="primary")
+                    sm_generate_btn = gr.Button(S.SM_GENERATE, variant="primary")
                     sm_stop_btn = gr.Button(S.STOP, variant="stop", visible=False)
-                    sm_save_btn = gr.Button("Save Combined Audio")
-                with gr.Accordion("Per-line breakdown", open=False):
-                    sm_table = gr.Markdown(value="*Results will appear after generation.*")
+                    sm_save_btn = gr.Button(S.SAVE_COMBINED)
+                with gr.Accordion(S.SM_BREAKDOWN, open=False):
+                    sm_table = gr.Markdown(value=S.SM_TABLE_EMPTY)
 
             with gr.Column(scale=1):
-                sm_audio = gr.Audio(label="Combined Output", type="numpy", interactive=False, buttons=["download"])
-                sm_status = gr.Textbox(label="Status", interactive=False)
+                sm_audio = gr.Audio(label=S.COMBINED_OUTPUT, type="numpy", interactive=False, buttons=["download"])
+                sm_status = gr.Textbox(label=S.SM_STATUS, interactive=False)
     return types.SimpleNamespace(
         script_tab=script_tab, sm_script=sm_script, sm_parse_btn=sm_parse_btn,
         sm_silence=sm_silence, sm_parse_status=sm_parse_status,
@@ -235,8 +226,8 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
       {speaker: {"mode": ..., "speaker": ..., "language": ..., "instruct": ..., "library_voice": ...}}
     """
     if not raw_text.strip():
-        gr.Warning("Enter a script first.")
-        yield None, "*Enter a script first.*", "Enter script first"
+        gr.Warning(S.SM_ENTER_SCRIPT_WARN)
+        yield None, S.SM_ENTER_SCRIPT_MD, S.SM_ENTER_SCRIPT
         return
 
     parsed = parse_script(raw_text)
@@ -246,8 +237,8 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
         return
 
     if not assignments_state:
-        gr.Warning("Parse the script and assign voices first.")
-        yield None, "*Parse the script and assign voices first.*", "Parse script first"
+        gr.Warning(S.SM_PARSE_FIRST_WARN)
+        yield None, S.SM_PARSE_FIRST_MD, S.SM_PARSE_FIRST
         return
 
     ctx.cancel_event.clear()
@@ -408,7 +399,7 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
             table_rows.append([str(line.line_number), line.speaker, preview,
                                "Stopped" if cancelled else "Failed"])
 
-    table_md = format_table_md(["Line", "Speaker", "Text", "Status"], table_rows, "*No results.*")
+    table_md = format_table_md(S.SM_TABLE_HEADERS, table_rows, S.SM_NO_RESULTS)
 
     if not audio_segments:
         yield None, table_md, ("Stopped" if cancelled else "All lines failed")
@@ -446,9 +437,9 @@ def wire(ctx, ui):
     def _parse_and_update_slots(raw_text):
         """Parse script and update speaker slot visibility."""
         if not raw_text.strip():
-            gr.Warning("Enter a script first.")
+            gr.Warning(S.SM_ENTER_SCRIPT_WARN)
             updates = [gr.update(visible=False) for _ in range(MAX_SCRIPT_SPEAKERS)]
-            return *updates, "Enter a script first", {}
+            return *updates, S.SM_ENTER_SCRIPT, {}
 
         parsed = parse_script(raw_text)
 
@@ -458,14 +449,15 @@ def wire(ctx, ui):
             return *updates, "; ".join(parsed.errors), {}
 
         # Build summary
-        summary_parts = [f"Found {len(parsed.speakers)} speakers, {len(parsed.lines)} lines:"]
+        summary_parts = [S.SM_SUMMARY_HEAD.format(
+            speakers=len(parsed.speakers), lines=len(parsed.lines))]
         lines_per_speaker = {}
         for line in parsed.lines:
             lines_per_speaker.setdefault(line.speaker, 0)
             lines_per_speaker[line.speaker] += 1
         for spk in parsed.speakers:
             count = lines_per_speaker.get(spk, 0)
-            summary_parts.append(f"  {spk}: {count} lines")
+            summary_parts.append(S.SM_SUMMARY_LINE.format(speaker=spk, count=count))
 
         # Build visibility updates for speaker slots
         updates = []
