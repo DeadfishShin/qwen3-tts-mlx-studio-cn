@@ -1,13 +1,17 @@
-mlx-audio>=0.4.3,<0.5
+# 0.4.6/0.4.7 regress ASR audio loading (decoder-side resampling with poor
+# alias rejection, upstream #870; fixed by #872 in 0.4.8) — floor must stay
+# >=0.4.8. 0.4.8 also removes hot-path cache clears (~13% faster streaming).
+mlx-audio>=0.4.8,<0.5
 # Core mlx: 0.31.2 segfaults the batched generation path; 0.32.0 verified fixed
 # (2026-07-11). Re-verify batch_generate before raising the ceiling — it's the
 # canary for mlx regressions.
 mlx>=0.31,!=0.31.2,<0.33
 gradio>=5.0,<7
 soundfile>=0.13
-numpy>=2.0
+# <2.5 because numba (installed alongside librosa) requires numpy<2.5.
+numpy>=2.0,<2.5
 yt-dlp>=2024.1
 pysrt>=1.1
-# transformers is not imported directly — pinned to keep mlx-audio's tokenizer
-# stack on a known-good major version (mlx-audio 0.4.5 itself requires <5.13).
-transformers>=5.5.0,<6
+# transformers is not imported directly — floor mirrors mlx-audio 0.4.8's own
+# requirement (>=5.14); <6 keeps the tokenizer stack on a known major.
+transformers>=5.14,<6
