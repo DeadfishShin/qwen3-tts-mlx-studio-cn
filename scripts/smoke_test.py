@@ -189,6 +189,7 @@ if not args.fast:
 def cache_returned():
     import mlx.core as mx
     cache_mb = mx.get_cache_memory() / 1e6
+    print(f"    peak MLX memory this run: {mx.get_peak_memory() / 1e9:.2f} GB")
     assert cache_mb < 50, f"MLX buffer cache not returned after generation: {cache_mb:.0f} MB"
 
 
