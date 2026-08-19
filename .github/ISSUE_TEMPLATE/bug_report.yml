@@ -1,0 +1,49 @@
+name: Bug report
+description: Something crashes, produces wrong audio, or behaves incorrectly
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the Voice Clone tab
+        2. Upload a 10s reference clip
+        3. Click Generate
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: Mac model and memory
+      placeholder: M4 Air, 16 GB
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "15.6"
+    validations:
+      required: true
+  - type: textarea
+    id: versions
+    attributes:
+      label: Package versions
+      description: "Paste the output of: pip list | grep -Ei 'mlx|gradio|transformers|numpy|soundfile'"
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Terminal output
+      description: The traceback or relevant log lines, if any.
+      render: text

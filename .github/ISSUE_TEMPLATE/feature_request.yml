@@ -1,0 +1,25 @@
+name: Feature request
+description: Suggest an improvement within the project's scope
+labels: [enhancement]
+body:
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      description: This is a local, single-user desktop studio for Apple Silicon.
+      options:
+        - label: I have read the [Scope section](https://github.com/g2h0/qwen3-tts-mlx-studio#scope) and this request is not a listed non-goal.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that is awkward or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
