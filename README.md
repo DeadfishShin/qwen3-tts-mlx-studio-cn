@@ -20,7 +20,7 @@ Feature requests outside this scope will usually be closed. Forks are welcome.
 ## Requirements
 
 - A Mac with Apple Silicon (M1, M2, M3, M4, or M5)
-- Python 3.10 or newer (3.12 recommended)
+- Python 3.10–3.13 (3.12 recommended — best wheel support across the MLX stack)
 - [Homebrew](https://brew.sh) (the installer uses it to set up dependencies)
 
 If you don't have Homebrew yet, open Terminal and paste:
@@ -166,11 +166,31 @@ script_parser.py  — Multi-speaker script parser
 history.py        — Generation history log
 config.py         — Constants and defaults
 theme.py          — Dark theme and custom CSS
+tests/            — Unit tests (engine faked — no models, no Apple Silicon needed)
 scripts/          — Smoke test and launch check
+.github/          — CI workflow and issue templates
+requirements.txt  — Runtime pins (load-bearing — see Development)
 install.sh        — One-step installer
 uninstall.sh      — Remove venv, caches, and downloaded models
 run.sh            — App launcher
 ```
+
+## Development
+
+```bash
+.venv/bin/python -m pytest tests/ -q       # unit tests — ~2s, loads no models
+./scripts/launch_check.sh                  # boots the app, then shuts it down
+.venv/bin/python scripts/smoke_test.py     # real models end to end, ~5 min
+```
+
+The unit suite fakes the engine, so it needs neither Apple Silicon nor a model
+download. CI runs it on every push and pull request, alongside a job that
+verifies the dependency pins still resolve on a clean Apple Silicon machine.
+
+The pins in `requirements.txt` are load-bearing rather than cosmetic: `mlx`
+excludes 0.31.2 because it segfaults batched generation, and `mlx-audio` floors
+at 0.4.8 because 0.4.6 and 0.4.7 regress ASR audio loading. Run the smoke test
+before raising either — CI can prove they install, not that they work.
 
 ## Troubleshooting
 
