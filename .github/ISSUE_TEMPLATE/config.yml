@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Scope and non-goals
+    url: https://github.com/g2h0/qwen3-tts-mlx-studio#scope
+    about: Server/API deployment, audiobook production, non-Apple-Silicon platforms, and training are out of scope. Please read this before filing a feature request.

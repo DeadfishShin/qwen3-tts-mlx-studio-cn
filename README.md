@@ -1,8 +1,21 @@
 # Qwen3-TTS MLX Studio
 
+[![tests](https://github.com/g2h0/qwen3-tts-mlx-studio/actions/workflows/tests.yml/badge.svg)](https://github.com/g2h0/qwen3-tts-mlx-studio/actions/workflows/tests.yml)
+
 Local text-to-speech and speech recognition on Apple Silicon, powered by [Qwen3-TTS](https://huggingface.co/Qwen) and [mlx-audio](https://github.com/Blaizzy/mlx-audio). Runs entirely on-device — no API keys, no internet required after the initial model download.
 
 ![Qwen3-TTS MLX Studio](assets/screenshot.png)
+
+## Scope
+
+A local, single-user desktop studio for Qwen3-TTS on Apple Silicon. Deliberately out of scope:
+
+- **Server or API deployment** — there is no OpenAI-compatible endpoint and no multi-user serving. This is a Gradio app bound to localhost.
+- **Long-form audiobook production** — EPUB/PDF ingestion, chaptering, and whole-book character casting are not planned. Script Mode covers short multi-speaker passages.
+- **Non-Apple-Silicon platforms** — mlx is Apple Silicon only by design.
+- **Training or fine-tuning** — inference only.
+
+Feature requests outside this scope will usually be closed. Forks are welcome.
 
 ## Requirements
 

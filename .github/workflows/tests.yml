@@ -1,0 +1,55 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: unit tests (fast)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      # The unit suite fakes the engine (tests/conftest.py::FakeEngine) and so
+      # never imports engine.py — the only module that pulls in mlx, which is
+      # Apple-Silicon-only. That lets the fast job run on Linux. If a new test
+      # imports a package that isn't listed here, this job fails loudly and the
+      # list needs updating; bounds mirror requirements.txt.
+      - name: Install test dependencies
+        run: |
+          pip install "numpy>=2.0,<2.5" "gradio>=5.0,<7" "soundfile>=0.13" "pysrt>=1.1"
+          pip install -r requirements-dev.txt
+      - run: python -m pytest tests/ -q
+
+  deps:
+    name: dependency pins resolve (Apple Silicon)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      # The canary for this project's recurring failure mode: mutually
+      # unsatisfiable pins across mlx / mlx-audio / transformers / numpy+numba.
+      # It proves the pin set installs on a clean Apple Silicon machine. It does
+      # NOT catch runtime regressions (the mlx 0.31.2 batch_generate segfault
+      # installed fine) — scripts/smoke_test.py remains the on-device gate.
+      - name: Install the real pin set
+        run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Check for conflicting dependencies
+        run: pip check
+      - run: python -m pytest tests/ -q
