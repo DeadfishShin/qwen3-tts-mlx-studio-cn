@@ -104,7 +104,7 @@ def build_output_column():
 
 def wire_run_lifecycle(
     start_btn, stop_btn, fn, inputs, outputs, show_progress="minimal",
-    reset_outputs=None, reset_fn=None,
+    reset_outputs=None, reset_fn=None, show_stop=True,
 ):
     """Wire start/stop lifecycle, optionally resetting outputs before running.
 
@@ -113,7 +113,7 @@ def wire_run_lifecycle(
     the shared generation pipeline.
     """
     begin = start_btn.click(
-        fn=lambda: (gr.update(interactive=False), gr.update(visible=True)),
+        fn=lambda: (gr.update(interactive=False), gr.update(visible=show_stop)),
         outputs=[start_btn, stop_btn], queue=False)
     if reset_outputs:
         reset = begin.then(

@@ -326,4 +326,5 @@ def wire(ctx, ui):
                 t.yt_trim_ref],
         outputs=[t.yt_audio_out, ui.status, t.yt_status,
                  ui.vc.vc_library_voice, ui.lib.lib_table],
+        show_stop=False,
     )

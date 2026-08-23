@@ -181,3 +181,32 @@ def test_clone_uploaded_ref_history_and_denoise_status(fake_engine, fake_history
     assert S.NOISE_REDUCTION_SUFFIX in out[-1][1]
     assert fake_history.entries[0]["voice_params"] == "ref: uploaded"
     assert fake_history.entries[0]["mode"] == "voice_clone"
+
+
+def test_single_clone_does_not_call_streaming_and_records_history(
+        fake_engine, fake_history, tmp_path):
+    ctx = make_ctx(fake_engine, fake_history, tmp_path)
+    output = list(run_single(ctx, GenRequest(
+        mode="voice_clone", text="完整生成测试", language="Chinese",
+        ref_audio="/tmp/reference.wav", ref_text="参考文本", trim_ref=False,
+    )))
+
+    assert output[-1][0] is not SKIP
+    assert fake_engine.single_calls[-1]["method"] == "generate_voice_clone"
+    assert not fake_engine.stream_calls
+    assert len(fake_history.entries) == 1
+    assert fake_history.entries[0]["mode"] == "voice_clone"
+
+
+def test_failed_single_clone_does_not_create_history(
+        fake_engine, fake_history, tmp_path):
+    fake_engine.fail_modes = {"voice_clone"}
+    ctx = make_ctx(fake_engine, fake_history, tmp_path)
+    output = list(run_single(ctx, GenRequest(
+        mode="voice_clone", text="失败测试", language="Chinese",
+        ref_audio="/tmp/reference.wav", ref_text="参考文本",
+    )))
+
+    assert output[-1][0] == SKIP
+    assert output[-1][1].startswith("错误：")
+    assert fake_history.entries == []

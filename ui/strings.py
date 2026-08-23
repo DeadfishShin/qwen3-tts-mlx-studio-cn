@@ -150,7 +150,9 @@ TAB_VOICE_CLONE = "声音克隆"
 VC_NOTICE_HTML = (
     "<div class='info-notice'>"
     "<strong>参考文本必须与音频中实际说出的内容完全一致。</strong>"
-    "请使用清晰的 3–30 秒音频片段以获得更好效果。"
+    "请使用清晰的 3–30 秒音频片段以获得更好效果。<br>"
+    "<strong>质量优先：单次声音克隆使用完整生成，生成期间不能中途停止，"
+    "也不使用分块超时；完成后一次性更新音频。</strong>"
     "</div>"
 )
 VC_LIBRARY_VOICE = "从声音库加载"
@@ -169,6 +171,7 @@ VC_SAVE_NO_NAME = "请输入声音名称"
 VC_SAVE_NO_TEXT_WARN = "参考文本为必填项。"
 VC_SAVE_NO_TEXT = "请输入参考文本"
 VC_SAVED = "声音“{name}”已保存到声音库"
+VC_NONSTREAM_GENERATING = "正在进行质量优先的完整生成，完成后更新音频……"
 
 # --- Transcription tab ---
 TAB_TRANSCRIPTION = "音频转写"
@@ -198,7 +201,8 @@ ASR_SAVED = "已保存：{path}"
 TAB_YT = "YouTube 声音克隆"
 YT_NOTICE_HTML = (
     "<div class='info-notice'>"
-    "从 YouTube 视频中提取声音：获取视频、选择时间范围、自动提取带对齐文本的片段，然后生成。"
+    "从 YouTube 视频中提取声音：获取视频、选择时间范围、自动提取带对齐文本的片段，然后生成。<br>"
+    "质量优先的完整克隆生成不能在生成中途停止，完成后一次性更新音频。"
     "</div>"
 )
 YT_STEP_1 = "**步骤 1——视频 URL**"

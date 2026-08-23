@@ -35,3 +35,26 @@ style, language, or sampling conditions change.
 Future voice-cloning or reference-audio work should use the archived WAV above
 as the authoritative local reference. Do not rely on the original generated
 filename remaining in place.
+
+## Production Clone reference
+
+The owner has separately confirmed the 7.45-second MEDIUM excerpt as the production
+conditioning reference for Base Voice Clone:
+
+- Local-only archive: `/Users/mizukinamachi/Qwen3-TTS/master_voice/Kurisu_Production_Clone_Reference_A.wav`
+- SHA-256: `b3c4ea03803b3b7226d85c8ddc288e47caab4113b63513e5218abe722f5dbfbe`
+- Exact reference text: `等一下，你这个结论是怎么得出来的？……不，我不是说一定有问题，只是这里少了一个必要条件。`
+- Local Voice Library profile: `Kurisu_Production_Clone_A`
+
+The MEDIUM reference was selected because it had the strongest same-woman and
+long-term-listening result in the length comparison. Five owner-run non-streaming
+checks scored 85/86/88/85/87 for Master similarity, with 0/5 severe startup
+artifacts. Normal single Clone therefore uses the quality-first non-streaming
+engine API. This improves startup reliability but removes responsive mid-generation
+Stop/timeout for that single path. Streaming Clone remains available internally for
+batch fallback and future low-latency work; no generic stream/non-stream toggle is
+exposed.
+
+This conditioning reference does **not** supersede `Kurisu_Master_Timbre_A.wav`
+as the authoritative timbre Master. The audio and Voice Library profile remain
+local-only and are not committed to the public repository.

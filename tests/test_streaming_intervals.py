@@ -32,7 +32,7 @@ def expected_sampler_kwargs(settings):
     }
 
 
-def test_clone_uses_two_second_interval_and_preserves_clone_arguments(
+def test_single_clone_uses_blocking_api_and_preserves_clone_arguments(
         fake_engine, fake_history, tmp_path):
     ctx = make_ctx(
         fake_engine, fake_history, tmp_path,
@@ -48,17 +48,14 @@ def test_clone_uses_two_second_interval_and_preserves_clone_arguments(
     result = run_single_to_completion(ctx, request)
 
     assert result[0][0] == fake_engine.sr
-    call = fake_engine.stream_calls[-1]
-    assert call["method"] == "stream_generate_voice_clone"
+    call = fake_engine.single_calls[-1]
+    assert call["method"] == "generate_voice_clone"
     assert call["ref_audio_path"] == "/tmp/reference.wav"
     assert call["ref_text"] == "准确的参考文本"
     assert call["language"] == "Chinese"
     assert call["denoise_ref"] is True
     assert call["trim_ref"] is False
-    assert call["kwargs"] == {
-        **expected_sampler_kwargs(ctx.settings),
-        "streaming_interval": 2.0,
-    }
+    assert call["kwargs"] == expected_sampler_kwargs(ctx.settings)
     assert not (tmp_path / "out").exists()
 
 

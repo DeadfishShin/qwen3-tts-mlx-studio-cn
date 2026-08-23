@@ -132,6 +132,7 @@ def wire(ctx, ui):
         inputs=[t.vc_text, t.vc_ref_audio, t.vc_ref_text, t.vc_language, t.vc_library_voice,
                 t.vc_trim_ref],
         outputs=[t.vc_audio, ui.status],
+        show_stop=False,
     )
     t.vc_save.click(
         fn=lambda audio: save_audio(ctx, audio, "clone"),

@@ -20,6 +20,7 @@ class FakeEngine:
         self.current_model = None
         self.current_model_type = None
         self.calls = []                          # (method, args) log
+        self.single_calls = []                   # structured blocking-call log
         self.stream_calls = []                   # structured stream-call log
         self.batch_calls = []                    # structured batch-call log
         self.n_chunks = 3                        # chunks per fake stream
@@ -37,6 +38,11 @@ class FakeEngine:
 
     def generate_custom_voice(self, text, speaker, language, instruct="", **kw):
         self.calls.append(("generate_custom_voice", text, language))
+        self.single_calls.append({
+            "method": "generate_custom_voice", "text": text,
+            "speaker": speaker, "language": language, "instruct": instruct,
+            "kwargs": dict(kw),
+        })
         if "custom_voice" in self.fail_modes:
             raise RuntimeError("fake single failure")
         self.current_model_type = "custom_voice"
@@ -44,6 +50,10 @@ class FakeEngine:
 
     def generate_voice_design(self, text, language, instruct, **kw):
         self.calls.append(("generate_voice_design", text, language))
+        self.single_calls.append({
+            "method": "generate_voice_design", "text": text,
+            "language": language, "instruct": instruct, "kwargs": dict(kw),
+        })
         if "voice_design" in self.fail_modes:
             raise RuntimeError("fake single failure")
         self.current_model_type = "voice_design"
@@ -52,6 +62,12 @@ class FakeEngine:
     def generate_voice_clone(self, text, ref_audio_path, ref_text, language="English",
                              denoise_ref=False, trim_ref=False, **kw):
         self.calls.append(("generate_voice_clone", text, language))
+        self.single_calls.append({
+            "method": "generate_voice_clone", "text": text,
+            "ref_audio_path": ref_audio_path, "ref_text": ref_text,
+            "language": language, "denoise_ref": denoise_ref,
+            "trim_ref": trim_ref, "kwargs": dict(kw),
+        })
         if "voice_clone" in self.fail_modes:
             raise RuntimeError("fake single failure")
         self.current_model_type = "base"
