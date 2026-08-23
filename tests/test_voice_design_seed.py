@@ -15,14 +15,64 @@ from generation import (
 from history import GenerationHistory
 from state import AppContext, AppSettings
 from ui import strings as S
+from ui.components import wire_run_lifecycle
 from ui.tabs.history_tab import history_regenerate
-from ui.tabs.voice_design import save_design_to_library
+from ui.tabs.voice_design import (
+    reset_voice_design_audio,
+    reuse_last_seed,
+    save_design_to_library,
+)
 from voice_library import VoiceLibrary
 
 
 def test_fixed_seed_preserves_requested_integer():
     assert resolve_voice_design_seed(False, 123456) == 123456
     assert normalize_voice_design_seed("123456") == 123456
+
+
+def test_voice_design_audio_reset_clears_stale_value_and_position():
+    update = reset_voice_design_audio()
+    assert update["__type__"] == "update"
+    assert update["value"] is None
+    assert update["playback_position"] == 0
+
+
+def test_audio_reset_is_chained_before_generation_output():
+    def run():
+        yield gr.skip(), "done"
+
+    with gr.Blocks() as demo:
+        start = gr.Button("start")
+        stop = gr.Button("stop")
+        audio = gr.Audio()
+        status = gr.Textbox()
+        wire_run_lifecycle(
+            start, stop, run, [], [audio, status],
+            reset_outputs=[audio], reset_fn=reset_voice_design_audio,
+        )
+
+    dependencies = demo.config["dependencies"]
+    reset_dependency = next(d for d in dependencies if d["outputs"] == [audio._id])
+    run_dependency = next(
+        d for d in dependencies if d["outputs"] == [audio._id, status._id]
+    )
+    assert reset_dependency["queue"] is False
+    assert run_dependency["trigger_after"] == reset_dependency["id"]
+
+
+def test_reuse_last_seed_switches_to_fixed_mode():
+    seed, random_mode = reuse_last_seed(
+        types.SimpleNamespace(last_voice_design_seed=123456)
+    )
+    assert seed == 123456
+    assert random_mode is False
+
+
+def test_reuse_last_seed_without_history_keeps_controls_unchanged(monkeypatch):
+    monkeypatch.setattr("ui.tabs.voice_design.gr.Info", lambda *a, **k: None)
+    seed, random_mode = reuse_last_seed(types.SimpleNamespace())
+    assert seed == gr.skip()
+    assert random_mode == gr.skip()
 
 
 def test_random_mode_resolves_fresh_seed_from_injected_entropy(monkeypatch):

@@ -81,6 +81,20 @@ def build(ctx):
     )
 
 
+def reset_voice_design_audio():
+    """Stop stale browser media and make the next Voice Design take start at 0."""
+    return gr.update(value=None, playback_position=0)
+
+
+def reuse_last_seed(ctx):
+    """Switch the seed controls to fixed mode using the last successful seed."""
+    seed = getattr(ctx, "last_voice_design_seed", None)
+    if seed is None:
+        gr.Info(S.VD_NO_LAST_SEED)
+        return gr.skip(), gr.skip()
+    return seed, False
+
+
 def save_design_to_library(ctx, audio_tuple, name, language, description, spoken_text):
     if audio_tuple is None:
         gr.Warning(S.VD_SAVE_NO_AUDIO_WARN)
@@ -132,21 +146,16 @@ def wire(ctx, ui):
         return result, gr.update(choices=voice_choices(ctx))
 
     wire_stop(ctx, t.vd_stop, ui.status)
-    def use_last_seed():
-        seed = getattr(ctx, "last_voice_design_seed", None)
-        if seed is None:
-            gr.Info(S.VD_NO_LAST_SEED)
-            return gr.skip()
-        return seed
-
     t.vd_use_last_seed.click(
-        fn=use_last_seed, outputs=[t.vd_seed], queue=False,
+        fn=lambda: reuse_last_seed(ctx),
+        outputs=[t.vd_seed, t.vd_random_seed], queue=False,
     )
     wire_run_lifecycle(
         t.vd_generate, t.vd_stop, on_generate,
         inputs=[t.vd_text, t.vd_language, t.vd_voice_description,
                 t.vd_style_instruction, t.vd_random_seed, t.vd_seed],
         outputs=[t.vd_audio, ui.status],
+        reset_outputs=[t.vd_audio], reset_fn=reset_voice_design_audio,
     )
     t.vd_save.click(
         fn=lambda audio: save_audio(ctx, audio, "design"),

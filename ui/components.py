@@ -102,12 +102,30 @@ def build_output_column():
     return types.SimpleNamespace(audio=audio, stop=stop, save=save, save_status=save_status)
 
 
-def wire_run_lifecycle(start_btn, stop_btn, fn, inputs, outputs, show_progress="minimal"):
-    """start → (disable start, show stop) → run fn → restore. Stop wiring is separate."""
+def wire_run_lifecycle(
+    start_btn, stop_btn, fn, inputs, outputs, show_progress="minimal",
+    reset_outputs=None, reset_fn=None,
+):
+    """Wire start/stop lifecycle, optionally resetting outputs before running.
+
+    ``reset_outputs`` is intentionally opt-in so a tab can clear stale browser
+    media without changing the output contract or partial-result behavior of
+    the shared generation pipeline.
+    """
     begin = start_btn.click(
         fn=lambda: (gr.update(interactive=False), gr.update(visible=True)),
         outputs=[start_btn, stop_btn], queue=False)
-    run = begin.then(fn=fn, inputs=inputs, outputs=outputs, show_progress=show_progress)
+    if reset_outputs:
+        reset = begin.then(
+            fn=reset_fn, outputs=reset_outputs, queue=False,
+        )
+        run = reset.then(
+            fn=fn, inputs=inputs, outputs=outputs, show_progress=show_progress,
+        )
+    else:
+        run = begin.then(
+            fn=fn, inputs=inputs, outputs=outputs, show_progress=show_progress,
+        )
     run.then(fn=lambda: (gr.update(interactive=True), gr.update(visible=False)),
              outputs=[start_btn, stop_btn], queue=False)
     return run
