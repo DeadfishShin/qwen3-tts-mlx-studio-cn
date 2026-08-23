@@ -4,7 +4,6 @@ import types
 
 import gradio as gr
 
-from config import LANGUAGES
 from ui import strings as S
 from ui.components import voice_table
 
@@ -45,7 +44,7 @@ def build(ctx):
                     label=S.LIB_IMPORT_NAME, placeholder=S.LIB_IMPORT_NAME_PLACEHOLDER
                 )
                 lib_import_language = gr.Dropdown(
-                    choices=LANGUAGES, value="English", label=S.LANGUAGE
+                    choices=S.LANGUAGE_CHOICES[1:], value="English", label=S.LANGUAGE
                 )
                 lib_import_btn = gr.Button(S.LIB_IMPORT, variant="primary")
     return types.SimpleNamespace(

@@ -3,7 +3,7 @@ import types
 
 import gradio as gr
 
-from config import DEFAULT_SCRIPT_SILENCE_MS, DEFAULT_SPEAKERS, LANGUAGE_AUTO, LANGUAGES, MAX_SCRIPT_SPEAKERS
+from config import DEFAULT_SCRIPT_SILENCE_MS, DEFAULT_SPEAKERS, LANGUAGE_AUTO, MAX_SCRIPT_SPEAKERS
 from audio_utils import concatenate_audio
 from generation import (
     GenerationCancelled, GenRequest, api_language, generate_once, save_audio,
@@ -49,14 +49,14 @@ def build(ctx):
                         sm_speaker_groups.append(grp)
                         with gr.Row():
                             mode = gr.Radio(
-                                ["Custom Voice", "Voice Design", "Voice Clone"],
-                                value="Custom Voice",
+                                S.SM_MODE_CHOICES,
+                                value="custom_voice",
                                 label=S.SM_SLOT_MODE.format(n=i + 1),
                                 scale=2,
                             )
                             sm_speaker_modes.append(mode)
                             lang = gr.Dropdown(
-                                choices=[LANGUAGE_AUTO] + LANGUAGES,
+                                choices=S.LANGUAGE_CHOICES,
                                 value=LANGUAGE_AUTO,
                                 label=S.LANGUAGE, scale=1,
                             )
@@ -114,6 +114,16 @@ def _script_secs(audio_by_line_number):
                [r for r in audio_by_line_number.values() if r is not None])
 
 
+def _localize_parse_error(error):
+    if error.startswith("No valid lines found in script"):
+        return S.SM_NO_VALID_LINES
+    if error.startswith("Too many speakers ("):
+        count = error.split("(", 1)[1].split(")", 1)[0]
+        max_count = error.rsplit("Maximum is ", 1)[-1].rstrip(".")
+        return S.SM_TOO_MANY_SPEAKERS.format(count=count, max_count=max_count)
+    return S.SM_PARSE_ERROR.format(err=error)
+
+
 def _generate_clone_lines_batched(ctx, lines, assignments_state, audio_by_line_number,
                                   done, total_lines, progress):
     """Generate Voice Clone script lines, batching lines that share a library voice.
@@ -145,7 +155,7 @@ def _generate_clone_lines_batched(ctx, lines, assignments_state, audio_by_line_n
             audio_by_line_number[line.line_number] = (sr, audio)
             succeeded += 1
             done += 1
-            progress(done / total_lines, desc="Generating Voice Clone lines...")
+            progress(done / total_lines, desc=S.SM_CLONE_PROGRESS)
         except GenerationCancelled:
             cancelled = True
         except Exception:
@@ -195,7 +205,7 @@ def _generate_clone_lines_batched(ctx, lines, assignments_state, audio_by_line_n
                         audio_by_line_number[chunk[j].line_number] = (sr, audio)
                         succeeded += 1
                         done += 1
-                        progress(done / total_lines, desc="Generating Voice Clone lines...")
+                        progress(done / total_lines, desc=S.SM_CLONE_PROGRESS)
                 except Exception:
                     # Batch failed — retry each line individually
                     for line in chunk:
@@ -232,8 +242,9 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
 
     parsed = parse_script(raw_text)
     if parsed.errors:
-        gr.Warning(parsed.errors[0])
-        yield None, f"*{parsed.errors[0]}*", parsed.errors[0]
+        parse_error = _localize_parse_error(parsed.errors[0])
+        gr.Warning(parse_error)
+        yield None, f"*{parse_error}*", parse_error
         return
 
     if not assignments_state:
@@ -250,12 +261,6 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
     table_rows = []
     succeeded, failed = 0, 0
 
-    model_type_labels = {
-        "custom_voice": "Custom Voice",
-        "voice_design": "Voice Design",
-        "base": "Voice Clone",
-    }
-
     total_lines = len(parsed.lines)
     done = 0
     cancelled = False
@@ -268,7 +273,7 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
         if cancelled or ctx.cancel_event.is_set():
             cancelled = True
             break
-        label = model_type_labels.get(model_type, model_type)
+        label = S.SM_MODE_LABELS.get(model_type, model_type)
         batch_size = ctx.settings.batch_size
 
         if model_type == "base":
@@ -326,7 +331,7 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
                         audio_by_line_number[batch_lines[j].line_number] = (sr, audio)
                         succeeded += 1
                         done += 1
-                        progress(done / total_lines, desc=f"Generating {label} lines...")
+                        progress(done / total_lines, desc=S.SM_PROGRESS.format(label=label))
 
                 except Exception:
                     # Batch failed — retry each line individually
@@ -363,7 +368,7 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
 
                 try:
                     if mode not in ("custom_voice", "voice_design"):
-                        raise ValueError(f"Unknown mode: {mode}")
+                        raise ValueError(S.SM_UNKNOWN_SPEAKER_MODE.format(mode=mode))
                     sr, audio = generate_once(ctx, GenRequest(
                         mode=mode, text=line.text,
                         language=assignment.get("language", "English"),
@@ -393,16 +398,16 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
             audio_segments.append((sr, audio))
             table_rows.append([str(line.line_number), line.speaker, preview, f"{duration:.1f}s"])
         elif line.line_number in audio_by_line_number:
-            table_rows.append([str(line.line_number), line.speaker, preview, "Failed"])
+            table_rows.append([str(line.line_number), line.speaker, preview, S.SM_FAILED])
         else:
             # never attempted — only happens when the run was stopped
             table_rows.append([str(line.line_number), line.speaker, preview,
-                               "Stopped" if cancelled else "Failed"])
+                               S.SM_STOPPED if cancelled else S.SM_FAILED])
 
     table_md = format_table_md(S.SM_TABLE_HEADERS, table_rows, S.SM_NO_RESULTS)
 
     if not audio_segments:
-        yield None, table_md, ("Stopped" if cancelled else "All lines failed")
+        yield None, table_md, (S.SM_STOPPED if cancelled else S.SM_ALL_FAILED)
         return
 
     combined = concatenate_audio(audio_segments, silence_ms=int(silence_ms))
@@ -420,14 +425,14 @@ def generate_script_handler(ctx, raw_text, assignments_state, silence_ms, progre
         mode="custom_voice",
         text=f"[Script: {succeeded} lines, speakers: {speakers_used}]",
         language="Multi", audio=combined,
-        voice_params="script mode",
+        voice_params=S.SM_HISTORY_PARAMS,
     )
 
-    status_msg = f"Generated {succeeded}/{total_lines} lines"
+    status_msg = S.SM_GENERATED.format(done=succeeded, total=total_lines)
     if failed:
-        status_msg += f" ({failed} failed)"
+        status_msg += S.SM_FAILURE_SUFFIX.format(count=failed)
     if ctx.settings.denoise_ref:
-        status_msg += " | Noise reduction applied"
+        status_msg += S.SM_NOISE_SUFFIX
     yield gr.update(value=combined), table_md, status_msg
 
 
@@ -444,9 +449,10 @@ def wire(ctx, ui):
         parsed = parse_script(raw_text)
 
         if parsed.errors:
-            gr.Warning(parsed.errors[0])
+            parse_error = _localize_parse_error(parsed.errors[0])
+            gr.Warning(parse_error)
             updates = [gr.update(visible=False) for _ in range(MAX_SCRIPT_SPEAKERS)]
-            return *updates, "; ".join(parsed.errors), {}
+            return *updates, parse_error, {}
 
         # Build summary
         summary_parts = [S.SM_SUMMARY_HEAD.format(
@@ -498,12 +504,15 @@ def wire(ctx, ui):
             "Custom Voice": "custom_voice",
             "Voice Design": "voice_design",
             "Voice Clone": "voice_clone",
+            "custom_voice": "custom_voice",
+            "voice_design": "voice_design",
+            "voice_clone": "voice_clone",
         }
         for i, spk in enumerate(parsed.speakers):
             if i >= MAX_SCRIPT_SPEAKERS:
                 break
             base = i * values_per_slot
-            mode_label = slot_values[base] if base < len(slot_values) else "Custom Voice"
+            mode_label = slot_values[base] if base < len(slot_values) else "custom_voice"
             assignments[spk] = {
                 "mode": mode_map.get(mode_label, "custom_voice"),
                 "speaker": slot_values[base + 1] if base + 1 < len(slot_values) else DEFAULT_SPEAKERS[0],

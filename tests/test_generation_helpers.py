@@ -8,6 +8,7 @@ from generation import (
     GenerationCancelled, GenerationTimeout, save_audio, stream_to_audio,
     is_model_cached, loading_status,
 )
+from ui import strings as S
 
 
 def make_ctx(fake_engine, fake_history, tmp_path):
@@ -45,7 +46,7 @@ def test_save_audio_writes_wav(fake_engine, fake_history, tmp_path):
     ctx = make_ctx(fake_engine, fake_history, tmp_path)
     audio = (24000, np.zeros(24000, dtype=np.float32))
     msg = save_audio(ctx, audio, prefix="unit")
-    assert msg.startswith("Saved: ")
+    assert msg.startswith(S.SAVED.format(path=""))
     saved = os.listdir(ctx.settings.output_dir)
     assert len(saved) == 1 and saved[0].startswith("unit_") and saved[0].endswith(".wav")
 
@@ -54,7 +55,7 @@ def test_save_audio_none(fake_engine, fake_history, tmp_path, monkeypatch):
     import generation
     monkeypatch.setattr(generation.gr, "Warning", lambda *a, **k: None)
     ctx = make_ctx(fake_engine, fake_history, tmp_path)
-    assert save_audio(ctx, None) == "No audio to save"
+    assert save_audio(ctx, None) == S.NO_AUDIO_TO_SAVE
 
 
 def test_is_model_cached_false_for_garbage():

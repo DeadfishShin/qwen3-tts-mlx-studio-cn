@@ -11,6 +11,7 @@ import numpy as np
 import soundfile as sf
 
 from config import HISTORY_DIR, MAX_HISTORY_AUDIO_CACHE, MAX_HISTORY_ENTRIES
+from ui import strings as S
 
 
 @dataclass
@@ -24,6 +25,8 @@ class HistoryEntry:
     speaker: str = ""       # for custom voice
     voice_params: str = ""  # instruct/description/library voice name
     audio_file: str = ""    # filename within HISTORY_DIR
+    voice_description: str = ""  # stable Voice Design identity description
+    style_instruction: str = ""   # transient Voice Design delivery style
 
 
 INDEX_FILE = "index.json"
@@ -67,6 +70,8 @@ class GenerationHistory:
         audio: tuple[int, np.ndarray],
         speaker: str = "",
         voice_params: str = "",
+        voice_description: str = "",
+        style_instruction: str = "",
     ) -> HistoryEntry:
         """Record a generation. Saves WAV to disk and updates index."""
         sr, audio_data = audio
@@ -79,6 +84,8 @@ class GenerationHistory:
             duration=round(duration, 2),
             speaker=speaker,
             voice_params=voice_params,
+            voice_description=voice_description,
+            style_instruction=style_instruction,
         )
         entry.audio_file = f"{entry.id}.wav"
 
@@ -165,6 +172,6 @@ class GenerationHistory:
         rows = []
         for e in self._entries:
             text_preview = e.text[:60] + "..." if len(e.text) > 60 else e.text
-            mode_label = e.mode.replace("_", " ").title()
+            mode_label = S.SM_MODE_LABELS.get(e.mode, e.mode)
             rows.append([e.id, e.timestamp, mode_label, text_preview, f"{e.duration:.1f}s"])
         return rows

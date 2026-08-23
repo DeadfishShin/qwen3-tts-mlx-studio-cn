@@ -87,14 +87,18 @@ def history_regenerate(ctx, entry_id):
     if entry is None:
         return S.HIST_NOT_FOUND
     parts = [
-        f"Mode: {entry.mode.replace('_', ' ').title()}",
-        f"Language: {entry.language}",
+        S.HIST_MODE.format(mode=S.SM_MODE_LABELS.get(entry.mode, entry.mode)),
+        S.HIST_LANGUAGE.format(language=entry.language),
     ]
     if entry.speaker:
-        parts.append(f"Voice: {entry.speaker}")
-    if entry.voice_params:
-        parts.append(f"Params: {entry.voice_params}")
-    parts.append(f"Text: {entry.text}")
+        parts.append(S.HIST_VOICE.format(speaker=entry.speaker))
+    if getattr(entry, "voice_description", ""):
+        parts.append(S.HIST_VOICE_DESCRIPTION.format(description=entry.voice_description))
+    if getattr(entry, "style_instruction", ""):
+        parts.append(S.HIST_STYLE_INSTRUCTION.format(style=entry.style_instruction))
+    if entry.voice_params and not getattr(entry, "voice_description", ""):
+        parts.append(S.HIST_PARAMS.format(params=entry.voice_params))
+    parts.append(S.HIST_TEXT.format(text=entry.text))
     return "\n".join(parts)
 
 

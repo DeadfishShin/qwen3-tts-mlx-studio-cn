@@ -4,6 +4,7 @@ import pytest
 import generation
 from generation import GenRequest, run_single
 from state import AppContext, AppSettings
+from ui import strings as S
 
 SKIP = gr.skip()
 
@@ -45,7 +46,7 @@ def test_empty_text_rejected(fake_engine, fake_history, tmp_path):
     ctx = make_ctx(fake_engine, fake_history, tmp_path)
     out = list(run_single(ctx, GenRequest(mode="custom_voice", text="  ",
                                           language="English", speaker="ryan")))
-    assert out == [(SKIP, "Enter text first")]
+    assert out == [(SKIP, S.TEXT_REQUIRED)]
     assert fake_engine.calls == []
 
 
@@ -53,7 +54,7 @@ def test_design_requires_instruct(fake_engine, fake_history, tmp_path):
     ctx = make_ctx(fake_engine, fake_history, tmp_path)
     out = list(run_single(ctx, GenRequest(mode="voice_design", text="hello",
                                           language="English", instruct=" ")))
-    assert out == [(SKIP, "Describe the voice first")]
+    assert out == [(SKIP, S.VOICE_DESCRIPTION_REQUIRED)]
 
 
 def test_success_live_status_then_result(fake_engine, fake_history, tmp_path):
@@ -66,11 +67,11 @@ def test_success_live_status_then_result(fake_engine, fake_history, tmp_path):
     assert "…" in out[0][1]                        # loading/downloading message
     for audio_out, status in out[1:4]:
         assert is_skip(audio_out)                  # player untouched until done
-        assert status.startswith("Generating…")
+        assert status.startswith("正在生成")
     final_audio, final_status = out[-1]
     sr, full = final_audio                          # full waveform delivered once
     assert len(full) == 3 * int(sr * 0.5)
-    assert final_status.startswith("Generated in ")
+    assert final_status.startswith("生成用时")
     assert "fake/custom_voice" in final_status
     assert len(fake_history.entries) == 1
     assert fake_history.entries[0]["mode"] == "custom_voice"
@@ -93,7 +94,7 @@ def test_cancel_keeps_partial_no_history(fake_engine, fake_history, tmp_path):
     out = list(run_single(ctx, GenRequest(mode="custom_voice", text="hello",
                                           language="English", speaker="ryan")))
     final_audio, status = out[-1]
-    assert status.startswith("Stopped — kept ")
+    assert status.startswith("已停止")
     sr, partial = final_audio                      # partial lands in the player
     assert len(partial) == 2 * int(sr * 0.5)       # chunks 0 and 1 kept
     assert fake_history.entries == []
@@ -105,7 +106,7 @@ def test_timeout_autocancels_keeps_partial(fake_engine, fake_history, tmp_path):
     out = list(run_single(ctx, GenRequest(mode="custom_voice", text="hello",
                                           language="English", speaker="ryan")))
     final_audio, status = out[-1]
-    assert "Timed out" in status and "kept" in status
+    assert "超时" in status and "保留" in status
     assert final_audio is not None and not is_skip(final_audio)
     assert fake_history.entries == []
 
@@ -115,7 +116,7 @@ def test_run_clears_stale_cancel(fake_engine, fake_history, tmp_path):
     ctx.cancel_event.set()                          # stale from a previous Stop
     out = list(run_single(ctx, GenRequest(mode="custom_voice", text="hello",
                                           language="English", speaker="ryan")))
-    assert out[-1][1].startswith("Generated in ")
+    assert out[-1][1].startswith("生成用时")
 
 
 def test_autosave(fake_engine, fake_history, tmp_path):
@@ -123,7 +124,7 @@ def test_autosave(fake_engine, fake_history, tmp_path):
     ctx = make_ctx(fake_engine, fake_history, tmp_path, autosave=True)
     out = list(run_single(ctx, GenRequest(mode="custom_voice", text="hello",
                                           language="English", speaker="ryan")))
-    assert " | Saved: " in out[-1][1]
+    assert "｜已保存：" in out[-1][1]
     assert len(os.listdir(ctx.settings.output_dir)) == 1
 
 
@@ -133,7 +134,7 @@ def test_engine_failure(fake_engine, fake_history, tmp_path):
     out = list(run_single(ctx, GenRequest(mode="custom_voice", text="hello",
                                           language="English", speaker="ryan")))
     assert is_skip(out[-1][0])
-    assert out[-1][1].startswith("Error: ")
+    assert out[-1][1].startswith("错误：")
     assert fake_history.entries == []
 
 
@@ -145,7 +146,7 @@ def test_clone_library_voice_resolution(fake_engine, fake_history, tmp_path):
     out = list(run_single(ctx, GenRequest(mode="voice_clone", text="hello",
                                           language="English",
                                           library_voice="narrator")))
-    assert out[-1][1].startswith("Generated in ")
+    assert out[-1][1].startswith("生成用时")
     assert fake_history.entries[0]["voice_params"] == "ref: narrator"
 
 
@@ -154,14 +155,14 @@ def test_clone_missing_library_voice(fake_engine, fake_history, tmp_path):
     out = list(run_single(ctx, GenRequest(mode="voice_clone", text="hello",
                                           language="English",
                                           library_voice="ghost")))
-    assert out == [(SKIP, "Voice not found")]
+    assert out == [(SKIP, S.VOICE_NOT_FOUND)]
 
 
 def test_clone_requires_ref_audio(fake_engine, fake_history, tmp_path):
     ctx = make_ctx(fake_engine, fake_history, tmp_path)
     out = list(run_single(ctx, GenRequest(mode="voice_clone", text="hello",
                                           language="English")))
-    assert out == [(SKIP, "No reference audio")]
+    assert out == [(SKIP, S.NO_REF_AUDIO)]
 
 
 def test_clone_requires_ref_text(fake_engine, fake_history, tmp_path):
@@ -169,7 +170,7 @@ def test_clone_requires_ref_text(fake_engine, fake_history, tmp_path):
     out = list(run_single(ctx, GenRequest(mode="voice_clone", text="hello",
                                           language="English",
                                           ref_audio="/tmp/x.wav", ref_text=" ")))
-    assert out == [(SKIP, "No reference transcript")]
+    assert out == [(SKIP, S.NO_REF_TEXT)]
 
 
 def test_clone_uploaded_ref_history_and_denoise_status(fake_engine, fake_history, tmp_path):
@@ -177,6 +178,6 @@ def test_clone_uploaded_ref_history_and_denoise_status(fake_engine, fake_history
     out = list(run_single(ctx, GenRequest(mode="voice_clone", text="hello",
                                           language="English",
                                           ref_audio="/tmp/x.wav", ref_text="hi there")))
-    assert " | Noise reduction applied" in out[-1][1]
+    assert S.NOISE_REDUCTION_SUFFIX in out[-1][1]
     assert fake_history.entries[0]["voice_params"] == "ref: uploaded"
     assert fake_history.entries[0]["mode"] == "voice_clone"

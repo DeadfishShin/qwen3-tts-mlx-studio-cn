@@ -5,7 +5,6 @@ from datetime import datetime
 
 import gradio as gr
 
-from config import LANGUAGES
 from generation import api_language, stream_transcription
 from ui import strings as S
 from ui.components import wire_run_lifecycle, wire_stop
@@ -23,8 +22,8 @@ def build(ctx):
                 )
                 with gr.Row():
                     asr_language = gr.Dropdown(
-                        choices=[S.LANGUAGE_AUTO] + LANGUAGES,
-                        value=S.LANGUAGE_AUTO,
+                        choices=S.LANGUAGE_CHOICES,
+                        value=S.LANGUAGE_AUTO_VALUE,
                         label=S.LANGUAGE,
                     )
                 with gr.Row():

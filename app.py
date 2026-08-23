@@ -64,20 +64,28 @@ args = parser.parse_args()
 def check_startup():
     warnings = []
     if sys.version_info < (3, 10):
-        warnings.append("Python 3.10+ required")
+        warnings.append(S.STARTUP_PYTHON_REQUIRED)
     try:
         import mlx_audio  # noqa: F401
     except ImportError:
-        warnings.append("mlx-audio not installed — run: pip install mlx-audio")
+        warnings.append(S.STARTUP_MLX_AUDIO_MISSING)
     if not shutil.which("ffmpeg"):
-        warnings.append("ffmpeg not found — run: brew install ffmpeg")
+        warnings.append(S.STARTUP_FFMPEG_MISSING)
     try:
         # Skip ffmpeg — already checked above
-        yt_missing = [w for w in get_yt_extractor().check_dependencies()
-                      if "ffmpeg" not in w]
+        yt_missing = []
+        for warning in get_yt_extractor().check_dependencies():
+            if "ffmpeg" in warning:
+                continue
+            if "yt-dlp" in warning:
+                yt_missing.append(S.STARTUP_YT_DLP_MISSING)
+            elif "pysrt" in warning:
+                yt_missing.append(S.STARTUP_PYSRT_MISSING)
+            else:
+                yt_missing.append(warning)
         warnings.extend(yt_missing)
     except Exception as e:
-        warnings.append(f"YT Voice Clone init error: {e}")
+        warnings.append(S.STARTUP_YT_ERROR.format(err=e))
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     if warnings:
         for w in warnings:
@@ -89,9 +97,7 @@ startup_warnings = check_startup()
 # ---------------------------------------------------------------------------
 # Application context
 # ---------------------------------------------------------------------------
-engine = TTSEngine()
-engine.model_size = args.model_size
-engine.quantization = args.quant
+engine = TTSEngine(model_size=args.model_size, quantization=args.quant)
 
 ctx = AppContext(
     engine=engine,
@@ -125,7 +131,8 @@ with gr.Blocks(title=S.APP_TITLE) as app:
         interactive=False,
         elem_classes=["status-bar"],
         value=S.STATUS_READY + (
-            f" | Warnings: {'; '.join(startup_warnings)}" if startup_warnings else ""
+            "｜" + S.STATUS_WARNINGS.format(warnings="；".join(startup_warnings))
+            if startup_warnings else ""
         ),
     )
 
@@ -136,11 +143,14 @@ with gr.Blocks(title=S.APP_TITLE) as app:
 # Launch
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    app.queue(max_size=5).launch(
-        server_name=args.host,
-        server_port=args.port,
-        share=args.share,
-        inbrowser=True,
-        css=custom_css,
-        theme=build_theme(),
-    )
+    try:
+        app.queue(max_size=5).launch(
+            server_name=args.host,
+            server_port=args.port,
+            share=args.share,
+            inbrowser=True,
+            css=custom_css,
+            theme=build_theme(),
+        )
+    finally:
+        engine.shutdown()

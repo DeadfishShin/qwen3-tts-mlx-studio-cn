@@ -5,14 +5,13 @@ import types
 
 import gradio as gr
 
-from audio_utils import unload_deepfilter
 from config import (
     LANGUAGE_AUTO,
     DEFAULT_AUTOSAVE, DEFAULT_BATCH_SIZE, DEFAULT_DENOISE_REF,
     DEFAULT_EXPORT_FORMAT, DEFAULT_LOUDNORM, DEFAULT_MAX_TOKENS,
     DEFAULT_MP3_BITRATE, DEFAULT_REPETITION_PENALTY, DEFAULT_TEMPERATURE,
     DEFAULT_TIMEOUT, DEFAULT_TOP_K, DEFAULT_TOP_P, DEFAULT_TRIM_SILENCE,
-    ENABLE_JIT_COMPILE, HISTORY_DIR, LANGUAGES, MAX_BATCH_SIZE, MIN_BATCH_SIZE,
+    ENABLE_JIT_COMPILE, HISTORY_DIR, MAX_BATCH_SIZE, MIN_BATCH_SIZE,
     OUTPUT_DIR, VOICE_LIBRARY_DIR, YT_CACHE_DIR,
 )
 from generation import get_hf_cache_dir
@@ -27,26 +26,36 @@ GENERATION_PRESETS = {
 
 
 def get_model_status(ctx):
-    if ctx.engine.current_model is None:
+    if hasattr(ctx.engine, "get_model_state"):
+        model_type, _, _, _ = ctx.engine.get_model_state()
+    else:
+        model_type = ctx.engine.current_model_type if ctx.engine.current_model is not None else None
+    if model_type is None:
         return S.SET_NO_MODEL
-    repo = ctx.engine.get_repo_id(ctx.engine.current_model_type)
+    repo = ctx.engine.get_repo_id(model_type)
     return S.SET_MODEL_LOADED.format(repo=repo)
 
 
 def build(ctx):
+    if hasattr(ctx.engine, "get_model_state"):
+        _, engine_model_size, engine_quantization, engine_jit = ctx.engine.get_model_state()
+    else:
+        engine_model_size = ctx.engine.model_size
+        engine_quantization = ctx.engine.quantization
+        engine_jit = ENABLE_JIT_COMPILE
     with gr.Tab(S.TAB_SETTINGS):
         with gr.Row():
             # --- Column 1: Model & Language ---
             with gr.Column(scale=1):
                 gr.Markdown(S.SET_MODEL_HEADER)
                 set_size = gr.Radio(
-                    ["0.6B", "1.7B"],
-                    value=ctx.engine.model_size,
+                    S.SET_MODEL_SIZE_CHOICES,
+                    value=engine_model_size,
                     label=S.SET_MODEL_SIZE,
                 )
                 set_quant = gr.Radio(
-                    ["4bit", "6bit", "8bit", "bf16"],
-                    value=ctx.engine.quantization,
+                    S.SET_QUANT_CHOICES,
+                    value=engine_quantization,
                     label=S.SET_QUANT,
                     info=S.SET_QUANT_INFO,
                 )
@@ -65,12 +74,12 @@ def build(ctx):
                 )
                 gr.Markdown(S.SET_LANGUAGE_HEADER)
                 set_default_language = gr.Dropdown(
-                    choices=[LANGUAGE_AUTO] + LANGUAGES,
+                    choices=S.LANGUAGE_CHOICES,
                     value=LANGUAGE_AUTO,
                     label=S.SET_DEFAULT_LANGUAGE,
                 )
                 set_jit = gr.Checkbox(
-                    value=ENABLE_JIT_COMPILE,
+                    value=engine_jit,
                     label=S.SET_JIT,
                     info=S.SET_JIT_INFO,
                 )
@@ -104,7 +113,7 @@ def build(ctx):
             with gr.Column(scale=1):
                 gr.Markdown(S.SET_GENERATION_HEADER)
                 set_preset = gr.Radio(
-                    ["Balanced", "Creative", "Precise", "Custom"],
+                    S.SET_PRESET_CHOICES,
                     value="Balanced",
                     label=S.SET_PRESET,
                     info=S.SET_PRESET_INFO,
@@ -160,7 +169,7 @@ def build(ctx):
                 )
                 gr.Markdown(S.SET_EXPORT_HEADER)
                 set_export_format = gr.Radio(
-                    ["wav", "mp3", "ogg"],
+                    S.SET_EXPORT_FORMAT_CHOICES,
                     value=DEFAULT_EXPORT_FORMAT,
                     label=S.SET_EXPORT_FORMAT,
                 )
@@ -284,16 +293,19 @@ def wire(ctx, ui):
         batch_size,
     ):
         engine = ctx.engine
-        model_changed = (
-            model_size != engine.model_size
-            or quantization != engine.quantization
-            or jit_compile != engine.jit_compile
-        )
-        engine.model_size = model_size
-        engine.quantization = quantization
-        engine.jit_compile = jit_compile
-        if model_changed:
-            engine.unload_model()
+        if hasattr(engine, "configure"):
+            model_changed = engine.configure(model_size, quantization, jit_compile)
+        else:
+            model_changed = (
+                model_size != engine.model_size
+                or quantization != engine.quantization
+                or jit_compile != engine.jit_compile
+            )
+            engine.model_size = model_size
+            engine.quantization = quantization
+            engine.jit_compile = jit_compile
+            if model_changed:
+                engine.unload_model()
 
         s = ctx.settings
         s.temperature = temperature
@@ -310,7 +322,8 @@ def wire(ctx, ui):
         s.trim_silence = trim_silence
         s.denoise_ref = denoise_ref
         if not denoise_ref:
-            unload_deepfilter()
+            if hasattr(engine, "unload_audio_preprocessors"):
+                engine.unload_audio_preprocessors()
         s.batch_size = int(batch_size)
         s.default_language = default_language
 

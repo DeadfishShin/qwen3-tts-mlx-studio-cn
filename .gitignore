@@ -4,6 +4,14 @@ __pycache__/
 outputs/
 voices/
 .yt_cache/
+models/
+huggingface/
+.cache/
+logs/
+*.wav
+*.mp3
+*.ogg
+*.flac
 .DS_Store
 .gum_bin/
 .claude/

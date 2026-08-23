@@ -3,6 +3,7 @@ import pytest
 import generation
 from generation import GenRequest, run_batch
 from state import AppContext, AppSettings
+from ui import strings as S
 
 from test_run_single import FakeLibrary
 
@@ -43,7 +44,7 @@ def test_batch_success(fake_engine, fake_history, tmp_path):
     ctx = make_ctx(fake_engine, fake_history, tmp_path)
     _, (audio_update, rows, status) = drain(
         run_batch(ctx, req(), "paragraph", 300, NoProgress()))
-    assert status == "Generated 3/3 segments"
+    assert status == S.BATCH_GENERATED_STATUS.format(done=3, total=3)
     assert len(rows) == 3
     assert rows[0][0] == "1" and rows[0][2].endswith("s")
     # batch_size=2 -> two batched calls
@@ -59,8 +60,8 @@ def test_batch_live_progress_statuses(fake_engine, fake_history, tmp_path):
     ctx = make_ctx(fake_engine, fake_history, tmp_path)
     ys, final = drain(run_batch(ctx, req(), "paragraph", 300, NoProgress()))
     progress_statuses = [s for _, _, s in ys[:-1]]
-    assert any(s.startswith("Segment 2/3") for s in progress_statuses)
-    assert final[2] == "Generated 3/3 segments"
+    assert any(s.startswith("片段 2/3") for s in progress_statuses)
+    assert final[2] == S.BATCH_GENERATED_STATUS.format(done=3, total=3)
 
 
 def test_batch_cancel_keeps_completed(fake_engine, fake_history, tmp_path):
@@ -75,7 +76,7 @@ def test_batch_cancel_keeps_completed(fake_engine, fake_history, tmp_path):
     fake_engine.batch_generate_custom_voice = cancel_after_first
     ys, (audio_update, rows, status) = drain(
         run_batch(ctx, req(), "paragraph", 300, NoProgress()))
-    assert status == "Stopped — completed 2/3 segments"
+    assert status == S.BATCH_STOPPED.format(done=2, total=3)
     assert audio_update is not None                # completed audio combined
     assert fake_history.entries == []
 
@@ -84,7 +85,7 @@ def test_batch_stale_cancel_cleared(fake_engine, fake_history, tmp_path):
     ctx = make_ctx(fake_engine, fake_history, tmp_path)
     ctx.cancel_event.set()
     _, (_, _, status) = drain(run_batch(ctx, req(), "paragraph", 300, NoProgress()))
-    assert status == "Generated 3/3 segments"
+    assert status == S.BATCH_GENERATED_STATUS.format(done=3, total=3)
 
 
 def test_batch_failure_falls_back_to_individual(fake_engine, fake_history, tmp_path):
@@ -92,7 +93,7 @@ def test_batch_failure_falls_back_to_individual(fake_engine, fake_history, tmp_p
     ctx = make_ctx(fake_engine, fake_history, tmp_path)
     _, (audio_update, rows, status) = drain(
         run_batch(ctx, req(), "paragraph", 300, NoProgress()))
-    assert status == "Generated 3/3 segments"
+    assert status == S.BATCH_GENERATED_STATUS.format(done=3, total=3)
     # fallback retries go through the cancel-aware streaming path
     singles = [c for c in fake_engine.calls if c[0] == "stream_generate_custom_voice"]
     assert len(singles) == 3
@@ -105,8 +106,8 @@ def test_individual_failures_reported(fake_engine, fake_history, tmp_path):
     _, (audio_update, rows, status) = drain(
         run_batch(ctx, req(), "paragraph", 300, NoProgress()))
     assert audio_update is None
-    assert status == "All segments failed"
-    assert all(r[2].startswith("Failed: ") for r in rows)
+    assert status == S.ALL_SEGMENTS_FAILED
+    assert all(r[2].startswith("失败：") for r in rows)
     assert fake_history.entries == []
 
 
@@ -115,7 +116,7 @@ def test_empty_text(fake_engine, fake_history, tmp_path):
     r = GenRequest(mode="custom_voice", text="   ", language="English", speaker="ryan")
     _, (audio_update, rows, status) = drain(
         run_batch(ctx, r, "paragraph", 300, NoProgress()))
-    assert audio_update is None and status == "No segments"
+    assert audio_update is None and status == S.NO_SEGMENTS
 
 
 def test_too_many_segments(fake_engine, fake_history, tmp_path):
@@ -125,7 +126,7 @@ def test_too_many_segments(fake_engine, fake_history, tmp_path):
     r = GenRequest(mode="custom_voice", text=many, language="English", speaker="ryan")
     _, (audio_update, rows, status) = drain(
         run_batch(ctx, r, "paragraph", 300, NoProgress()))
-    assert audio_update is None and "Too many segments" in status
+    assert audio_update is None and status.startswith("片段过多")
 
 
 def test_design_batch_requires_instruct(fake_engine, fake_history, tmp_path):
@@ -135,8 +136,8 @@ def test_design_batch_requires_instruct(fake_engine, fake_history, tmp_path):
     _, (audio_update, rows, status) = drain(
         run_batch(ctx, r, "paragraph", 300, NoProgress()))
     # batch handler wording differs from single ("Describe voice first")
-    assert audio_update is None and status == "Describe voice first"
-    assert rows == [["(empty)", "", ""]]
+    assert audio_update is None and status == S.VD_BATCH_DESCRIPTION_REQUIRED
+    assert rows == [[S.SEGMENT_EMPTY, "", ""]]
 
 
 def test_clone_mode_batches(fake_engine, fake_history, tmp_path):
@@ -145,7 +146,7 @@ def test_clone_mode_batches(fake_engine, fake_history, tmp_path):
                    ref_audio="/tmp/ref.wav", ref_text="ref transcript")
     _, (audio_update, rows, status) = drain(
         run_batch(ctx, r, "paragraph", 300, NoProgress()))
-    assert status == "Generated 2/2 segments"
+    assert status == S.BATCH_GENERATED_STATUS.format(done=2, total=2)
     batch_calls = [c for c in fake_engine.calls if c[0] == "batch_generate_voice_clone"]
     assert len(batch_calls) == 1               # one shared-ref batched call
     assert fake_history.entries[0]["voice_params"] == "batch ref: uploaded"
@@ -159,7 +160,7 @@ def test_clone_batch_falls_back_individually(fake_engine, fake_history, tmp_path
                    ref_audio="/tmp/ref.wav", ref_text="ref transcript")
     _, (audio_update, rows, status) = drain(
         run_batch(ctx, r, "paragraph", 300, NoProgress()))
-    assert status == "Generated 2/2 segments"
+    assert status == S.BATCH_GENERATED_STATUS.format(done=2, total=2)
     singles = [c for c in fake_engine.calls if c[0] == "stream_generate_voice_clone"]
     assert len(singles) == 2
 
@@ -171,8 +172,8 @@ def test_clone_batch_validation_strings(fake_engine, fake_history, tmp_path):
     _, (audio_update, rows, status) = drain(
         run_batch(ctx, r, "paragraph", 300, NoProgress()))
     # batch wording is "No transcript" (single says "No reference transcript")
-    assert status == "No transcript"
-    assert rows == [["(error)", "", ""]]
+    assert status == S.NO_REF_TEXT
+    assert rows == [[S.SEGMENT_ERROR, "", ""]]
 
 
 def test_clone_batch_denoise_suffix(fake_engine, fake_history, tmp_path):
@@ -182,4 +183,4 @@ def test_clone_batch_denoise_suffix(fake_engine, fake_history, tmp_path):
                    ref_audio="/tmp/ref.wav", ref_text="ref transcript")
     _, (audio_update, rows, status) = drain(
         run_batch(ctx, r, "paragraph", 300, NoProgress()))
-    assert status == "Generated 2/2 segments | Noise reduction applied"
+    assert status == S.BATCH_GENERATED_STATUS.format(done=2, total=2) + S.NOISE_REDUCTION_SUFFIX

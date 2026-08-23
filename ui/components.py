@@ -25,7 +25,9 @@ def format_table_md(headers, rows, empty_msg=None):
 
 def voice_choices(ctx):
     """Return list of saved voice names for dropdowns."""
-    return ["None"] + [v["name"] for v in ctx.library.list_voices()]
+    return [(S.NO_LIBRARY_VOICE, "None")] + [
+        (v["name"], v["name"]) for v in ctx.library.list_voices()
+    ]
 
 
 def voice_table(ctx):
@@ -56,7 +58,7 @@ def build_batch_accordion():
     with gr.Accordion(S.BATCH_ACCORDION, open=False, elem_classes=["batch-accordion"]):
         with gr.Row():
             batch_split = gr.Radio(
-                ["paragraph", "sentence", "line"],
+                S.BATCH_SPLIT_CHOICES,
                 value=DEFAULT_BATCH_SPLIT_MODE,
                 label=S.SPLIT_MODE,
             )
@@ -66,7 +68,7 @@ def build_batch_accordion():
             )
         batch_generate = gr.Button(S.GENERATE_BATCH, variant="primary")
         batch_table = gr.Dataframe(
-            headers=["#", "Text", "Status"],
+            headers=S.BATCH_TABLE_HEADERS,
             value=[["", "", ""]],
             label=S.BATCH_RESULTS,
             interactive=False,

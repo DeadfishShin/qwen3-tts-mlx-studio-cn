@@ -4,7 +4,6 @@ import types
 
 import gradio as gr
 
-from config import LANGUAGE_AUTO, LANGUAGES
 from generation import (
     GenerationCancelled, GenerationTimeout, GenRequest, generate_once, save_audio,
     stream_transcription,
@@ -62,8 +61,8 @@ def build(ctx):
                 )
                 with gr.Row():
                     yt_language = gr.Dropdown(
-                        choices=[LANGUAGE_AUTO] + LANGUAGES,
-                        value=LANGUAGE_AUTO, label=S.LANGUAGE, scale=1
+                        choices=S.LANGUAGE_CHOICES,
+                        value=S.LANGUAGE_AUTO_VALUE, label=S.LANGUAGE, scale=1
                     )
                     yt_voice_name = gr.Textbox(
                         label=S.YT_VOICE_NAME,
@@ -121,8 +120,9 @@ def fetch_yt_info(ctx, url):
             sub_note = S.YT_SUBS_NONE
         md = (
             f"**{info['title']}**\n\n"
-            f"Duration: {dur_str}  |  {sub_note}"
-            + (f"\n\nChannel: {info['uploader']}" if info.get("uploader") else "")
+            + S.YT_DURATION.format(duration=dur_str, subtitle=sub_note)
+            + (f"\n\n{S.YT_CHANNEL.format(channel=info['uploader'])}"
+               if info.get("uploader") else "")
         )
         state = {
             "id": info["id"],
@@ -137,11 +137,12 @@ def fetch_yt_info(ctx, url):
             S.YT_FETCHED.format(title=info["title"][:60]),
         )
     except (ValueError, RuntimeError) as e:
-        gr.Warning(str(e))
-        return gr.update(), f"**Error:** {e}", {}, str(e)
+        gr.Warning(S.YT_ERROR.format(err=e))
+        return gr.update(), f"**{S.YT_ERROR.format(err=e)}**", {}, S.YT_ERROR.format(err=e)
     except Exception as e:
-        gr.Warning(f"Failed to fetch video info: {e}")
-        return gr.update(), f"**Error:** {e}", {}, f"Error: {e}"
+        gr.Warning(S.YT_FETCH_ERROR.format(err=e))
+        return (gr.update(), f"**{S.YT_ERROR.format(err=e)}**", {},
+                S.YT_ERROR.format(err=e))
 
 
 def extract_yt_clip(ctx, url, start_str, end_str, video_state, progress=gr.Progress()):
@@ -156,7 +157,7 @@ def extract_yt_clip(ctx, url, start_str, end_str, video_state, progress=gr.Progr
     try:
         start_sec = ctx.yt.parse_timestamp(start_str or "0")
     except ValueError as e:
-        gr.Warning(str(e))
+        gr.Warning(S.YT_ERROR.format(err=e))
         return gr.update(), gr.update(), S.YT_BAD_START.format(err=e)
 
     # Resolve end — blank defaults to video duration (or full video)
@@ -197,7 +198,13 @@ def extract_yt_clip(ctx, url, start_str, end_str, video_state, progress=gr.Progr
         progress(0.0, desc=S.YT_EXTRACT_PROGRESS_START)
         wav_path, _ = ctx.yt.download_clip(
             url.strip(), video_id, start_sec, end_sec,
-            progress_cb=lambda f, d: progress(f, desc=d),
+            progress_cb=lambda f, d: progress(f, desc={
+                "Using cached clip": S.YT_PROGRESS_CACHED,
+                "Downloading audio section…": S.YT_PROGRESS_AUDIO,
+                "Converting to WAV…": S.YT_PROGRESS_WAV,
+                "Downloading subtitles…": S.YT_PROGRESS_SUBTITLES,
+                "Done": S.YT_EXTRACT_PROGRESS_DONE,
+            }.get(d, d)),
         )
         progress(0.90, desc=S.YT_EXTRACT_PROGRESS_TRANSCRIPT)
         transcript = ctx.yt.extract_transcript(video_id, start_sec, end_sec)
@@ -211,7 +218,7 @@ def extract_yt_clip(ctx, url, start_str, end_str, video_state, progress=gr.Progr
         )
     except Exception as e:
         gr.Warning(S.YT_EXTRACT_FAILED.format(err=e))
-        return gr.update(), gr.update(), f"Error: {e}"
+        return gr.update(), gr.update(), S.YT_ERROR.format(err=e)
 
 
 def transcribe_yt_clip(ctx, clip_audio):
@@ -257,9 +264,10 @@ def clone_yt_voice(ctx, text, ref_audio, transcript, language, voice_name, trim_
         )
         extra = ""
         if ctx.settings.autosave:
-            extra = " | " + save_audio(ctx, result, "yt_clone")
-        denoise_msg = " | Noise reduction applied" if ctx.settings.denoise_ref else ""
-        status_msg = f"Generated in {elapsed:.1f}s | {lib_msg}{denoise_msg}{extra}"
+            extra = "｜" + save_audio(ctx, result, "yt_clone")
+        denoise_msg = S.NOISE_REDUCTION_SUFFIX if ctx.settings.denoise_ref else ""
+        status_msg = S.YT_GENERATED_STATUS.format(
+            secs=elapsed, library=lib_msg, denoise=denoise_msg, save=extra)
         return (
             gr.update(value=result),
             status_msg,
@@ -270,11 +278,12 @@ def clone_yt_voice(ctx, text, ref_audio, transcript, language, voice_name, trim_
     except GenerationCancelled:
         return gr.update(), S.YT_STOPPED, S.YT_STOPPED, gr.update(), gr.update()
     except GenerationTimeout as e:
-        gr.Warning(str(e))
-        return gr.update(), str(e), str(e), gr.update(), gr.update()
+        gr.Warning(S.ERROR.format(err=e))
+        return gr.update(), S.ERROR.format(err=e), S.ERROR.format(err=e), gr.update(), gr.update()
     except Exception as e:
-        gr.Warning(f"Generation failed: {e}")
-        return gr.update(), f"Error: {e}", f"Error: {e}", gr.update(), gr.update()
+        gr.Warning(S.YT_GENERATION_FAILED.format(err=e))
+        return (gr.update(), S.YT_ERROR.format(err=e), S.YT_ERROR.format(err=e),
+                gr.update(), gr.update())
 
 
 def wire(ctx, ui):

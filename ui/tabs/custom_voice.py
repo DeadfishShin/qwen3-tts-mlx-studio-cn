@@ -3,7 +3,7 @@ import types
 
 import gradio as gr
 
-from config import DEFAULT_SPEAKERS, LANGUAGES
+from config import DEFAULT_SPEAKERS
 from generation import GenRequest, run_batch, run_single, save_audio
 from ui import strings as S
 from ui.components import (
@@ -27,8 +27,8 @@ def build(ctx):
                         label=S.CV_SPEAKER,
                     )
                     cv_language = gr.Dropdown(
-                        choices=[S.LANGUAGE_AUTO] + LANGUAGES,
-                        value=S.LANGUAGE_AUTO,
+                        choices=S.LANGUAGE_CHOICES,
+                        value=S.LANGUAGE_AUTO_VALUE,
                         label=S.LANGUAGE,
                     )
                 cv_instruct = gr.Textbox(

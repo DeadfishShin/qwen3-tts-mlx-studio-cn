@@ -1,6 +1,20 @@
-# Qwen3-TTS MLX Studio
+# Qwen3-TTS MLX Studio CN
 
-[![tests](https://github.com/g2h0/qwen3-tts-mlx-studio/actions/workflows/tests.yml/badge.svg)](https://github.com/g2h0/qwen3-tts-mlx-studio/actions/workflows/tests.yml)
+[![tests](https://github.com/DeadfishShin/qwen3-tts-mlx-studio-cn/actions/workflows/tests.yml/badge.svg)](https://github.com/DeadfishShin/qwen3-tts-mlx-studio-cn/actions/workflows/tests.yml)
+
+> **中文说明 / Chinese-first notice**
+>
+> 本仓库是一个非官方的社区衍生项目（unofficial community derivative），不代表或获得 Qwen、阿里巴巴、g2h0、Apple 或 MLX 维护者的认可。上游项目是 [`g2h0/qwen3-tts-mlx-studio`](https://github.com/g2h0/qwen3-tts-mlx-studio)。
+>
+> 本衍生项目的主要改进包括：
+> - 简体中文 WebUI 本地化与中文优先的显示标签
+> - 独立的 Voice Design 风格指令 UI 层
+> - 共享 Hugging Face 模型缓存部署
+> - 长驻、线程亲和的 MLX 专用推理线程
+> - 本地运行时错误诊断日志
+> - 为稳定的 Apple Silicon 运行默认关闭 JIT（设置中仍保留可选开关）
+>
+> **English:** This is an unofficial community derivative of [`g2h0/qwen3-tts-mlx-studio`](https://github.com/g2h0/qwen3-tts-mlx-studio). It is not endorsed by Qwen, Alibaba, g2h0, Apple, or MLX maintainers. The fork adds Simplified Chinese UI localization, a separate Voice Design style-instruction layer, shared Hugging Face cache deployment, a dedicated long-lived MLX inference thread, runtime diagnostics, and a JIT-off-by-default Apple Silicon baseline.
 
 Local text-to-speech and speech recognition on Apple Silicon, powered by [Qwen3-TTS](https://huggingface.co/Qwen) and [mlx-audio](https://github.com/Blaizzy/mlx-audio). Runs entirely on-device — no API keys, no internet required after the initial model download.
 
@@ -65,8 +79,8 @@ Generation is never a black box:
 Open Terminal and run:
 
 ```bash
-git clone https://github.com/g2h0/qwen3-tts-mlx-studio.git
-cd qwen3-tts-mlx-studio
+git clone https://github.com/DeadfishShin/qwen3-tts-mlx-studio-cn.git
+cd qwen3-tts-mlx-studio-cn
 ```
 
 **2. Run the installer**

@@ -3,7 +3,6 @@ import types
 
 import gradio as gr
 
-from config import LANGUAGES
 from generation import GenRequest, run_batch, run_single, save_audio, stream_transcription
 from ui import strings as S
 from ui.components import (
@@ -19,8 +18,8 @@ def build(ctx):
             with gr.Column(scale=2):
                 with gr.Row():
                     vc_language = gr.Dropdown(
-                        choices=[S.LANGUAGE_AUTO] + LANGUAGES,
-                        value=S.LANGUAGE_AUTO, label=S.LANGUAGE
+                        choices=S.LANGUAGE_CHOICES,
+                        value=S.LANGUAGE_AUTO_VALUE, label=S.LANGUAGE
                     )
                     vc_library_voice = gr.Dropdown(
                         choices=voice_choices(ctx),
@@ -69,22 +68,22 @@ def build(ctx):
 def transcribe_reference(ctx, ref_audio):
     """Transcribe reference audio and fill the transcript box (streams live)."""
     if not ref_audio:
-        gr.Warning("Upload reference audio first.")
-        yield gr.update(), "No audio to transcribe"
+        gr.Warning(S.VC_NO_REF_AUDIO_WARN)
+        yield gr.update(), S.VC_NO_REF_AUDIO
         return
     yield from stream_transcription(ctx, ref_audio, "auto")
 
 
 def save_clone_to_library(ctx, ref_audio, ref_text, name, language):
     if not ref_audio:
-        gr.Warning("No reference audio to save.")
-        return "No reference audio"
+        gr.Warning(S.VC_SAVE_NO_AUDIO_WARN)
+        return S.VC_SAVE_NO_AUDIO
     if not name.strip():
-        gr.Warning("Please enter a name for this voice.")
-        return "Enter a voice name"
+        gr.Warning(S.VC_SAVE_NO_NAME_WARN)
+        return S.VC_SAVE_NO_NAME
     if not ref_text or not ref_text.strip():
-        gr.Warning("Reference transcript is required.")
-        return "Enter transcript"
+        gr.Warning(S.VC_SAVE_NO_TEXT_WARN)
+        return S.VC_SAVE_NO_TEXT
     ctx.library.save_voice(
         name=name,
         ref_audio_path=ref_audio,
@@ -92,7 +91,7 @@ def save_clone_to_library(ctx, ref_audio, ref_text, name, language):
         language=language,
         source="clone",
     )
-    return f"Voice '{name}' saved to library"
+    return S.VC_SAVED.format(name=name)
 
 
 def wire(ctx, ui):

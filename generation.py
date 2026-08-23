@@ -78,22 +78,22 @@ def stream_transcription(ctx, audio_path, language):
                 yield gr.update(value=text.strip()), S.TRANSCRIBE_STOPPED
                 return
     except Exception as e:
-        gr.Warning(f"Transcription failed: {e}")
-        yield gr.skip(), f"Error: {e}"
+        gr.Warning(S.TRANSCRIPTION_FAILED.format(err=e))
+        yield gr.skip(), S.ERROR.format(err=e)
         return
     finally:
         stream.close()
     if not text.strip():
-        yield gr.skip(), "Transcription returned empty"
+        yield gr.skip(), S.TRANSCRIPTION_EMPTY
         return
-    yield gr.update(value=text.strip()), f"Transcribed ({len(text.split())} words)"
+    yield gr.update(value=text.strip()), S.TRANSCRIBED.format(words=len(text.split()))
 
 
 def save_audio(ctx, audio_tuple, prefix="output"):
     """Save generated audio to the configured output directory."""
     if audio_tuple is None:
-        gr.Warning("No audio to save.")
-        return "No audio to save"
+        gr.Warning(S.NO_AUDIO_TO_SAVE_WARN)
+        return S.NO_AUDIO_TO_SAVE
     sr, audio = audio_tuple
     out_dir = ctx.settings.output_dir
     os.makedirs(out_dir, exist_ok=True)
@@ -110,15 +110,20 @@ def save_audio(ctx, audio_tuple, prefix="output"):
         trim_silence=ctx.settings.trim_silence,
     )
     if fmt != "wav" and final_path.endswith(".wav"):
-        gr.Warning(f"ffmpeg not available — saved as WAV instead of {fmt.upper()}.")
-    return f"Saved: {final_path}"
+        gr.Warning(S.FFMPEG_WARN.format(format=fmt.upper()))
+    return S.SAVED.format(path=final_path)
 
 
 def get_hf_cache_dir() -> str:
     """Return the HuggingFace hub cache directory path."""
     return (
-        os.environ.get("HF_HOME")
+        # HF_HOME is the parent directory; the Hub cache itself is HF_HOME/hub.
+        # Prefer the explicit hub-cache variables so relocated caches are
+        # detected correctly by the UI as well as by huggingface_hub.
+        os.environ.get("HF_HUB_CACHE")
         or os.environ.get("HUGGINGFACE_HUB_CACHE")
+        or (os.path.join(os.environ["HF_HOME"], "hub")
+            if os.environ.get("HF_HOME") else None)
         or os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub")
     )
 
@@ -137,10 +142,8 @@ def loading_status(ctx, model_type):
         return None
     repo_id = ctx.engine.get_repo_id(model_type)
     if is_model_cached(repo_id):
-        return f"Loading model into memory… ({repo_id})"
-    return (
-        f"Downloading model on first run (~6 GB) — this may take several minutes… ({repo_id})"
-    )
+        return S.LOADING_MODEL.format(repo=repo_id)
+    return S.DOWNLOADING_MODEL.format(repo=repo_id)
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +160,31 @@ class GenRequest:
     ref_text: str = ""              # voice_clone
     library_voice: str = "None"     # voice_clone
     trim_ref: bool = True           # voice_clone: VAD-trim reference silence
+    voice_description: str = ""     # voice_design: stable identity description
+    style_instruction: str = ""     # voice_design: per-generation delivery style
+
+
+def compose_voice_design_instruct(voice_description: str, style_instruction: str = "") -> str:
+    """Compose the two UI fields into the engine's single instruction channel.
+
+    An empty style field returns the description verbatim so description-only
+    generation remains compatible with the previous Voice Design path.
+    """
+    description = (voice_description or "").strip()
+    style = (style_instruction or "").strip()
+    if not style:
+        return description
+    return S.VD_PROMPT_FORMAT.format(
+        identity=S.VD_IDENTITY_HEADER,
+        description=description,
+        style=S.VD_STYLE_HEADER,
+        style_instruction=style,
+    )
+
+
+def request_voice_description(req: GenRequest) -> str:
+    """Return the stable Voice Design description, with old-field fallback."""
+    return (req.voice_description or req.instruct or "").strip()
 
 
 def api_language(language):
@@ -170,8 +198,8 @@ def _clone_voice_info(req):
 
 def _validate_common(ctx, req):
     if not req.text.strip():
-        gr.Warning("Please enter text to speak.")
-        return "Enter text first"
+        gr.Warning(S.TEXT_REQUIRED_WARN)
+        return S.TEXT_REQUIRED
     return None
 
 
@@ -179,9 +207,9 @@ def _validate_design(ctx, req):
     err = _validate_common(ctx, req)
     if err:
         return err
-    if not req.instruct.strip():
-        gr.Warning("Please describe the voice you want.")
-        return "Describe the voice first"
+    if not request_voice_description(req):
+        gr.Warning(S.VOICE_DESCRIPTION_REQUIRED_WARN)
+        return S.VOICE_DESCRIPTION_REQUIRED
     return None
 
 
@@ -200,14 +228,14 @@ def _resolve_clone_library(ctx, req):
 def _prepare_clone(ctx, req):
     """Single-generation clone prep: library resolution + ref checks (app.py wording)."""
     if _resolve_clone_library(ctx, req):
-        gr.Warning(f"Voice '{req.library_voice}' not found in library.")
-        return None, "Voice not found"
+        gr.Warning(S.VOICE_NOT_FOUND_WARN.format(name=req.library_voice))
+        return None, S.VOICE_NOT_FOUND
     if not req.ref_audio:
-        gr.Warning("Please upload reference audio or select from library.")
-        return None, "No reference audio"
+        gr.Warning(S.REF_AUDIO_REQUIRED_WARN)
+        return None, S.NO_REF_AUDIO
     if not req.ref_text or not req.ref_text.strip():
-        gr.Warning("Reference transcript is required for voice cloning.")
-        return None, "No reference transcript"
+        gr.Warning(S.REF_TEXT_REQUIRED_WARN)
+        return None, S.NO_REF_TEXT
     return req, None
 
 
@@ -220,7 +248,7 @@ def _no_extras(ctx):
 
 
 def _clone_extras(ctx):
-    return " | Noise reduction applied" if ctx.settings.denoise_ref else ""
+    return S.NOISE_REDUCTION_SUFFIX if ctx.settings.denoise_ref else ""
 
 
 def _batch_prepare_identity(ctx, req):
@@ -229,23 +257,23 @@ def _batch_prepare_identity(ctx, req):
 
 def _batch_prepare_design(ctx, req):
     """Voice Design batch checks instruct up front (app.py batch wording)."""
-    if not req.instruct.strip():
-        gr.Warning("Please describe the voice.")
-        return None, ([["(empty)", "", ""]], "Describe voice first")
+    if not request_voice_description(req):
+        gr.Warning(S.VD_BATCH_DESCRIPTION_REQUIRED_WARN)
+        return None, ([[S.SEGMENT_EMPTY, "", ""]], S.VD_BATCH_DESCRIPTION_REQUIRED)
     return req, None
 
 
 def _batch_prepare_clone(ctx, req):
     """Voice Clone batch: library resolution + ref checks (app.py batch wording)."""
     if _resolve_clone_library(ctx, req):
-        gr.Warning(f"Voice '{req.library_voice}' not found.")
-        return None, ([["(error)", "", ""]], "Voice not found")
+        gr.Warning(S.VOICE_NOT_FOUND_WARN.format(name=req.library_voice))
+        return None, ([[S.SEGMENT_ERROR, "", ""]], S.VOICE_NOT_FOUND)
     if not req.ref_audio:
-        gr.Warning("No reference audio.")
-        return None, ([["(error)", "", ""]], "No reference audio")
+        gr.Warning(S.REF_AUDIO_REQUIRED_WARN)
+        return None, ([[S.SEGMENT_ERROR, "", ""]], S.NO_REF_AUDIO)
     if not req.ref_text or not req.ref_text.strip():
-        gr.Warning("Reference transcript required.")
-        return None, ([["(error)", "", ""]], "No transcript")
+        gr.Warning(S.REF_TEXT_REQUIRED_WARN)
+        return None, ([[S.SEGMENT_ERROR, "", ""]], S.NO_REF_TEXT)
     return req, None
 
 
@@ -286,15 +314,23 @@ MODES = {
         validate=_validate_design,
         prepare=_no_prepare,
         call_stream=lambda ctx, req, **kw: ctx.engine.stream_generate_voice_design(
-            req.text, api_language(req.language), req.instruct,
+            req.text, api_language(req.language),
+            compose_voice_design_instruct(request_voice_description(req), req.style_instruction),
             streaming_interval=STREAMING_INTERVAL_S, **kw),
-        history_kwargs=lambda req: dict(voice_params=req.instruct),
+        history_kwargs=lambda req: dict(
+            voice_params=request_voice_description(req),
+            voice_description=request_voice_description(req),
+            style_instruction=(req.style_instruction or "").strip()),
         status_extras=_no_extras,
         batch_prepare=_batch_prepare_design,
         call_batch=lambda ctx, texts, req, **kw: ctx.engine.batch_generate_voice_design(
-            texts, api_language(req.language), req.instruct, **kw),
+            texts, api_language(req.language),
+            compose_voice_design_instruct(request_voice_description(req), req.style_instruction),
+            **kw),
         batch_history_kwargs=lambda req, split_mode: dict(
-            voice_params=f"batch ({split_mode})"),
+            voice_params=f"batch ({split_mode})",
+            voice_description=request_voice_description(req),
+            style_instruction=(req.style_instruction or "").strip()),
     ),
     "voice_clone": ModeSpec(
         model_type="base", save_prefix="clone",
@@ -361,14 +397,14 @@ def run_single(ctx, req):
                 timed_out = True
                 break
     except Exception as e:
-        gr.Warning(f"Generation failed: {e}")
-        yield gr.skip(), f"Error: {e}"
+        gr.Warning(S.GENERATION_FAILED.format(err=e))
+        yield gr.skip(), S.ERROR.format(err=e)
         return
     finally:
         stream.close()
 
     if not parts:
-        yield gr.skip(), "No audio produced"
+        yield gr.skip(), S.NO_AUDIO_PRODUCED
         return
     result = (sr, np.concatenate(parts))
     secs = len(result[1]) / sr
@@ -384,10 +420,13 @@ def run_single(ctx, req):
                     audio=result, **spec.history_kwargs(req))
     save_msg = ""
     if ctx.settings.autosave:
-        save_msg = " | " + save_audio(ctx, result, spec.save_prefix)
-    yield result, (
-        f"Generated in {elapsed:.1f}s | Model: "
-        f"{ctx.engine.get_repo_id(spec.model_type)}{spec.status_extras(ctx)}{save_msg}")
+        save_msg = "｜" + save_audio(ctx, result, spec.save_prefix)
+    yield result, S.GENERATED_STATUS.format(
+        secs=elapsed,
+        repo=ctx.engine.get_repo_id(spec.model_type),
+        extras=spec.status_extras(ctx),
+        save=save_msg,
+    )
 
 
 def _segment_preview(seg):
@@ -413,12 +452,14 @@ def run_batch(ctx, req, split_mode, silence_ms, progress):
         return
     segments = split_text(req.text, split_mode)
     if not segments:
-        gr.Warning("No text segments found.")
-        yield None, [["(empty)", "", ""]], "No segments"
+        gr.Warning(S.NO_TEXT_SEGMENTS_WARN)
+        yield None, [[S.SEGMENT_EMPTY, "", ""]], S.NO_SEGMENTS
         return
     if len(segments) > MAX_BATCH_SEGMENTS:
-        gr.Warning(f"Too many segments ({len(segments)}). Max is {MAX_BATCH_SEGMENTS}.")
-        yield None, [["(error)", "", ""]], f"Too many segments (max {MAX_BATCH_SEGMENTS})"
+        gr.Warning(S.TOO_MANY_SEGMENTS_WARN.format(
+            count=len(segments), max_count=MAX_BATCH_SEGMENTS))
+        yield None, [[S.SEGMENT_ERROR, "", ""]], S.TOO_MANY_SEGMENTS.format(
+            max_count=MAX_BATCH_SEGMENTS)
         return
 
     ctx.cancel_event.clear()
@@ -440,10 +481,10 @@ def run_batch(ctx, req, split_mode, silence_ms, progress):
             table_rows.append([str(idx + 1), preview, f"{len(audio) / sr:.1f}s"])
             succeeded += 1
         except GenerationCancelled:
-            table_rows.append([str(idx + 1), preview, "Stopped"])
+            table_rows.append([str(idx + 1), preview, S.SEGMENT_STOPPED])
             cancelled = True
         except Exception as e:
-            table_rows.append([str(idx + 1), preview, f"Failed: {e}"])
+            table_rows.append([str(idx + 1), preview, S.SEGMENT_FAILED.format(err=e)])
             failed += 1
 
     def progress_status():
@@ -465,7 +506,7 @@ def run_batch(ctx, req, split_mode, silence_ms, progress):
                 table_rows.append(
                     [str(idx + 1), _segment_preview(batch_segs[j]), f"{len(audio) / sr:.1f}s"])
                 succeeded += 1
-                progress((batch_start + j + 1) / total, desc="Generating segments")
+                progress((batch_start + j + 1) / total, desc=S.GENERATE_BATCH)
             yield gr.skip(), list(table_rows), progress_status()
         except Exception:
             # Batch failed — retry each segment individually
@@ -474,11 +515,11 @@ def run_batch(ctx, req, split_mode, silence_ms, progress):
                     cancelled = True
                     break
                 run_one(batch_indices[j], seg)
-                progress((batch_start + j + 1) / total, desc="Generating segments")
+                progress((batch_start + j + 1) / total, desc=S.GENERATE_BATCH)
                 yield gr.skip(), list(table_rows), progress_status()
 
     if not audio_parts:
-        yield None, table_rows, ("Stopped" if cancelled else "All segments failed")
+        yield None, table_rows, (S.SEGMENT_STOPPED if cancelled else S.ALL_SEGMENTS_FAILED)
         return
 
     combined = concatenate_audio(audio_parts, silence_ms=int(silence_ms))
@@ -491,8 +532,8 @@ def run_batch(ctx, req, split_mode, silence_ms, progress):
         language=req.language, audio=combined,
         **spec.batch_history_kwargs(req, split_mode),
     )
-    status_msg = f"Generated {succeeded}/{total} segments"
+    status_msg = S.BATCH_GENERATED_STATUS.format(done=succeeded, total=total)
     if failed:
-        status_msg += f" ({failed} failed)"
+        status_msg += S.BATCH_FAILED_SUFFIX.format(count=failed)
     status_msg += spec.status_extras(ctx)
     yield gr.update(value=combined), table_rows, status_msg

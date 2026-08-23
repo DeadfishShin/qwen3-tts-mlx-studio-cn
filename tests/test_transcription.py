@@ -2,6 +2,7 @@ import pytest
 
 from generation import stream_transcription
 from state import AppContext, AppSettings
+from ui import strings as S
 
 
 @pytest.fixture(autouse=True)
@@ -22,17 +23,17 @@ def test_stream_transcription_accumulates(fake_engine, fake_history):
     assert len(out) == 4
     final_update, final_status = out[-1]
     assert final_update["value"] == "fake transcript"
-    assert final_status == "Transcribed (2 words)"
+    assert final_status == S.TRANSCRIBED.format(words=2)
 
 
 def test_stream_transcription_stop_keeps_partial(fake_engine, fake_history):
     ctx = make_ctx(fake_engine, fake_history)
     gen = stream_transcription(ctx, "/tmp/x.wav", "auto")
-    assert next(gen)[1] == "Loading ASR model..."
+    assert next(gen)[1] == S.ASR_LOADING
     next(gen)                                     # first delta arrived
     ctx.cancel_event.set()
     update, status = next(gen)
-    assert status == "Stopped — partial transcript kept"
+    assert status == S.TRANSCRIBE_STOPPED
     assert update["value"] == "fake"
     assert list(gen) == []                        # generator ends cleanly
 
@@ -60,4 +61,4 @@ def test_stream_transcription_error(fake_engine, fake_history):
     fake_engine.stream_transcribe = boom
     ctx = make_ctx(fake_engine, fake_history)
     out = list(stream_transcription(ctx, "/tmp/x.wav", "auto"))
-    assert out[-1][1].startswith("Error: ")
+    assert out[-1][1].startswith("错误：")

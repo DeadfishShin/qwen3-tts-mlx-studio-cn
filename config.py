@@ -83,8 +83,10 @@ DEEPFILTER_REPO = "mlx-community/DeepFilterNet-mlx"
 # Silero VAD model (~2MB) for trimming reference-clip silence
 VAD_REPO = "mlx-community/silero-vad"
 
-# JIT compilation — set False to disable if you hit issues
-ENABLE_JIT_COMPILE = True
+# JIT compilation — opt in only after the worker-thread path is proven stable.
+# MLX compile-cache cleanup has had interpreter-shutdown regressions; the
+# user-facing Settings toggle remains available for an explicit opt-in.
+ENABLE_JIT_COMPILE = False
 
 # Gradio settings
 SERVER_HOST = "127.0.0.1"
