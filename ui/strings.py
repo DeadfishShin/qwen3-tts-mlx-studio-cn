@@ -514,6 +514,11 @@ SET_CACHE_DIR_MISSING = "未找到模型下载目录"
 SET_DELETED_MODELS = "已删除 {n} 个模型：{names}"
 SET_DELETE_FAILED = "删除 {n} 个模型失败：{details}"
 SET_NO_MODELS_FOUND = "缓存中没有找到 Qwen3-TTS 模型"
+SETTINGS_LOAD_FAILED = "本地设置文件无法读取，已使用安全默认值：{err}"
+SETTINGS_INVALID_VALUE = "本地设置“{key}”无效，已回退为安全默认值。"
+SETTINGS_UNSUPPORTED_VERSION = "本地设置版本不受支持，已读取可识别的设置并使用安全默认值补全。"
+SETTINGS_SAVE_FAILED = "设置已应用，但无法保存到本地设置文件：{err}"
+SETTINGS_SANITIZED = "部分无效设置已回退为安全默认值"
 
 # --- Startup checks and table empty states ---
 STARTUP_PYTHON_REQUIRED = "需要 Python 3.10 或更高版本"

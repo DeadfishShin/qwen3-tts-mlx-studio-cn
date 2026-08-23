@@ -2,6 +2,8 @@
 __pycache__/
 *.pyc
 outputs/
+# The actual file lives outside this repository at ../config/settings.json.
+config/settings.json
 voices/
 .yt_cache/
 models/

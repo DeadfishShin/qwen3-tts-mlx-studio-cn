@@ -2,19 +2,20 @@
 import os
 import shutil
 import types
+from dataclasses import replace
 
 import gradio as gr
 
 from config import (
     LANGUAGE_AUTO,
-    DEFAULT_AUTOSAVE, DEFAULT_BATCH_SIZE, DEFAULT_DENOISE_REF,
-    DEFAULT_EXPORT_FORMAT, DEFAULT_LOUDNORM, DEFAULT_MAX_TOKENS,
-    DEFAULT_MP3_BITRATE, DEFAULT_REPETITION_PENALTY, DEFAULT_TEMPERATURE,
-    DEFAULT_TIMEOUT, DEFAULT_TOP_K, DEFAULT_TOP_P, DEFAULT_TRIM_SILENCE,
-    ENABLE_JIT_COMPILE, HISTORY_DIR, MAX_BATCH_SIZE, MIN_BATCH_SIZE,
-    OUTPUT_DIR, VOICE_LIBRARY_DIR, YT_CACHE_DIR,
+    DEFAULT_MAX_TOKENS, DEFAULT_REPETITION_PENALTY, DEFAULT_TEMPERATURE,
+    DEFAULT_TIMEOUT, DEFAULT_TOP_K, DEFAULT_TOP_P,
+    HISTORY_DIR, MAX_BATCH_SIZE, MIN_BATCH_SIZE,
+    VOICE_LIBRARY_DIR, YT_CACHE_DIR,
 )
 from generation import get_hf_cache_dir
+from settings_store import PERSISTED_SETTING_KEYS, sanitize_settings, save_settings
+from state import AppSettings
 from ui import strings as S
 
 
@@ -36,13 +37,19 @@ def get_model_status(ctx):
     return S.SET_MODEL_LOADED.format(repo=repo)
 
 
+def preset_for_settings(settings):
+    values = (
+        settings.temperature, settings.top_k, settings.top_p,
+        settings.repetition_penalty, settings.max_tokens, settings.timeout,
+    )
+    for name, preset in GENERATION_PRESETS.items():
+        if values == preset:
+            return name
+    return "Custom"
+
+
 def build(ctx):
-    if hasattr(ctx.engine, "get_model_state"):
-        _, engine_model_size, engine_quantization, engine_jit = ctx.engine.get_model_state()
-    else:
-        engine_model_size = ctx.engine.model_size
-        engine_quantization = ctx.engine.quantization
-        engine_jit = ENABLE_JIT_COMPILE
+    settings = ctx.settings
     with gr.Tab(S.TAB_SETTINGS):
         with gr.Row():
             # --- Column 1: Model & Language ---
@@ -50,12 +57,12 @@ def build(ctx):
                 gr.Markdown(S.SET_MODEL_HEADER)
                 set_size = gr.Radio(
                     S.SET_MODEL_SIZE_CHOICES,
-                    value=engine_model_size,
+                    value=settings.model_size,
                     label=S.SET_MODEL_SIZE,
                 )
                 set_quant = gr.Radio(
                     S.SET_QUANT_CHOICES,
-                    value=engine_quantization,
+                    value=settings.quantization,
                     label=S.SET_QUANT,
                     info=S.SET_QUANT_INFO,
                 )
@@ -68,18 +75,18 @@ def build(ctx):
                 set_unload = gr.Button(S.SET_UNLOAD)
                 gr.Markdown(S.SET_REF_HEADER)
                 set_denoise_ref = gr.Checkbox(
-                    value=DEFAULT_DENOISE_REF,
+                    value=settings.denoise_ref,
                     label=S.SET_DENOISE,
                     info=S.SET_DENOISE_INFO,
                 )
                 gr.Markdown(S.SET_LANGUAGE_HEADER)
                 set_default_language = gr.Dropdown(
                     choices=S.LANGUAGE_CHOICES,
-                    value=LANGUAGE_AUTO,
+                    value=settings.default_language,
                     label=S.SET_DEFAULT_LANGUAGE,
                 )
                 set_jit = gr.Checkbox(
-                    value=engine_jit,
+                    value=settings.jit_compile,
                     label=S.SET_JIT,
                     info=S.SET_JIT_INFO,
                 )
@@ -114,43 +121,43 @@ def build(ctx):
                 gr.Markdown(S.SET_GENERATION_HEADER)
                 set_preset = gr.Radio(
                     S.SET_PRESET_CHOICES,
-                    value="Balanced",
+                    value=preset_for_settings(settings),
                     label=S.SET_PRESET,
                     info=S.SET_PRESET_INFO,
                 )
                 set_temperature = gr.Slider(
-                    0.0, 1.5, value=DEFAULT_TEMPERATURE, step=0.05,
+                    0.0, 1.5, value=settings.temperature, step=0.05,
                     label=S.SET_TEMP,
                     info=S.SET_TEMP_INFO,
                 )
                 set_top_k = gr.Slider(
-                    0, 100, value=DEFAULT_TOP_K, step=1,
+                    0, 100, value=settings.top_k, step=1,
                     label=S.SET_TOP_K,
                     info=S.SET_TOP_K_INFO,
                 )
                 set_top_p = gr.Slider(
-                    0.0, 1.0, value=DEFAULT_TOP_P, step=0.05,
+                    0.0, 1.0, value=settings.top_p, step=0.05,
                     label=S.SET_TOP_P,
                     info=S.SET_TOP_P_INFO,
                 )
                 set_rep_penalty = gr.Slider(
-                    1.0, 2.0, value=DEFAULT_REPETITION_PENALTY, step=0.05,
+                    1.0, 2.0, value=settings.repetition_penalty, step=0.05,
                     label=S.SET_REP_PENALTY,
                     info=S.SET_REP_PENALTY_INFO,
                 )
                 set_max_tokens = gr.Slider(
-                    512, 8192, value=DEFAULT_MAX_TOKENS, step=256,
+                    512, 8192, value=settings.max_tokens, step=256,
                     label=S.SET_MAX_TOKENS,
                     info=S.SET_MAX_TOKENS_INFO,
                 )
                 set_timeout = gr.Slider(
-                    30, 300, value=DEFAULT_TIMEOUT, step=10,
+                    30, 300, value=settings.timeout, step=10,
                     label=S.SET_TIMEOUT,
                     info=S.TIMEOUT_SLIDER_INFO,
                 )
                 set_batch_size = gr.Slider(
                     MIN_BATCH_SIZE, MAX_BATCH_SIZE,
-                    value=DEFAULT_BATCH_SIZE, step=1,
+                    value=settings.batch_size, step=1,
                     label=S.SET_BATCH_SIZE,
                     info=S.SET_BATCH_SIZE_INFO,
                 )
@@ -160,32 +167,32 @@ def build(ctx):
             with gr.Column(scale=1):
                 gr.Markdown(S.SET_OUTPUT_HEADER)
                 set_output_dir = gr.Textbox(
-                    value=OUTPUT_DIR,
+                    value=settings.output_dir,
                     label=S.SET_OUTPUT_DIR,
                 )
                 set_autosave = gr.Checkbox(
-                    value=DEFAULT_AUTOSAVE,
+                    value=settings.autosave,
                     label=S.SET_AUTOSAVE,
                 )
                 gr.Markdown(S.SET_EXPORT_HEADER)
                 set_export_format = gr.Radio(
                     S.SET_EXPORT_FORMAT_CHOICES,
-                    value=DEFAULT_EXPORT_FORMAT,
+                    value=settings.export_format,
                     label=S.SET_EXPORT_FORMAT,
                 )
                 set_mp3_bitrate = gr.Slider(
-                    64, 320, value=DEFAULT_MP3_BITRATE, step=32,
+                    64, 320, value=settings.mp3_bitrate, step=32,
                     label=S.SET_MP3_BITRATE,
-                    visible=False,
+                    visible=settings.export_format == "mp3",
                 )
                 gr.Markdown(S.SET_POST_HEADER)
                 set_loudnorm = gr.Checkbox(
-                    value=DEFAULT_LOUDNORM,
+                    value=settings.loudnorm,
                     label=S.SET_LOUDNORM,
                     info=S.SET_LOUDNORM_INFO,
                 )
                 set_trim_silence = gr.Checkbox(
-                    value=DEFAULT_TRIM_SILENCE,
+                    value=settings.trim_silence,
                     label=S.SET_TRIM_SILENCE,
                 )
                 with gr.Accordion(S.SET_STORAGE_ACCORDION, open=False, elem_classes=["settings-accordion"]):
@@ -255,6 +262,32 @@ def reset_generation_defaults():
     )
 
 
+def reset_settings_defaults():
+    """Reset every Settings-tab preference; persistence still needs Apply."""
+    defaults = AppSettings()
+    return (
+        gr.update(value=defaults.model_size),
+        gr.update(value=defaults.quantization),
+        gr.update(value=defaults.denoise_ref),
+        gr.update(value=defaults.default_language),
+        gr.update(value=defaults.jit_compile),
+        gr.update(value=preset_for_settings(defaults)),
+        gr.update(value=defaults.temperature),
+        gr.update(value=defaults.top_k),
+        gr.update(value=defaults.top_p),
+        gr.update(value=defaults.repetition_penalty),
+        gr.update(value=defaults.max_tokens),
+        gr.update(value=defaults.timeout),
+        gr.update(value=defaults.batch_size),
+        gr.update(value=defaults.output_dir),
+        gr.update(value=defaults.autosave),
+        gr.update(value=defaults.export_format),
+        gr.update(value=defaults.mp3_bitrate, visible=defaults.export_format == "mp3"),
+        gr.update(value=defaults.loudnorm),
+        gr.update(value=defaults.trim_silence),
+    )
+
+
 def delete_cached_models(ctx):
     """Delete all Qwen3-TTS model files from the HuggingFace cache."""
     ctx.engine.unload_model()
@@ -282,64 +315,88 @@ def delete_cached_models(ctx):
     return S.SET_NO_MODELS_FOUND, S.SET_NO_MODEL
 
 
-def wire(ctx, ui):
-    t = ui.settings
+def apply_settings(
+    ctx,
+    model_size, quantization,
+    temperature, top_k, top_p, repetition_penalty, max_tokens, timeout,
+    output_dir, autosave, jit_compile, default_language,
+    export_format, mp3_bitrate, loudnorm, trim_silence, denoise_ref,
+    batch_size,
+):
+    """Apply validated Settings-tab values and atomically persist them."""
+    candidate = replace(
+        ctx.settings,
+        model_size=model_size,
+        quantization=quantization,
+        temperature=temperature,
+        top_k=top_k,
+        top_p=top_p,
+        repetition_penalty=repetition_penalty,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        output_dir=output_dir,
+        autosave=autosave,
+        jit_compile=jit_compile,
+        default_language=default_language,
+        export_format=export_format,
+        mp3_bitrate=mp3_bitrate,
+        loudnorm=loudnorm,
+        trim_silence=trim_silence,
+        denoise_ref=denoise_ref,
+        batch_size=batch_size,
+    )
+    normalized, warnings = sanitize_settings(candidate)
 
-    def apply_settings(
-        model_size, quantization,
-        temperature, top_k, top_p, repetition_penalty, max_tokens, timeout,
-        output_dir, autosave, jit_compile, default_language,
-        export_format, mp3_bitrate, loudnorm, trim_silence, denoise_ref,
-        batch_size,
-    ):
-        engine = ctx.engine
-        if hasattr(engine, "configure"):
-            model_changed = engine.configure(model_size, quantization, jit_compile)
-        else:
-            model_changed = (
-                model_size != engine.model_size
-                or quantization != engine.quantization
-                or jit_compile != engine.jit_compile
+    engine = ctx.engine
+    if hasattr(engine, "configure"):
+        model_changed = engine.configure(
+            normalized.model_size, normalized.quantization, normalized.jit_compile
+        )
+    else:
+        model_changed = (
+            normalized.model_size != engine.model_size
+            or normalized.quantization != engine.quantization
+            or normalized.jit_compile != engine.jit_compile
+        )
+        engine.model_size = normalized.model_size
+        engine.quantization = normalized.quantization
+        engine.jit_compile = normalized.jit_compile
+        if model_changed:
+            engine.unload_model()
+
+    for key in PERSISTED_SETTING_KEYS:
+        setattr(ctx.settings, key, getattr(normalized, key))
+    if not normalized.denoise_ref and hasattr(engine, "unload_audio_preprocessors"):
+        engine.unload_audio_preprocessors()
+
+    os.makedirs(normalized.output_dir, exist_ok=True)
+    try:
+        save_settings(normalized)
+    except OSError as exc:
+        msg = S.SETTINGS_SAVE_FAILED.format(err=exc)
+    else:
+        parts = [
+            S.SET_APPLIED_SIZE_QUANT.format(
+                size=normalized.model_size, quant=normalized.quantization
             )
-            engine.model_size = model_size
-            engine.quantization = quantization
-            engine.jit_compile = jit_compile
-            if model_changed:
-                engine.unload_model()
-
-        s = ctx.settings
-        s.temperature = temperature
-        s.top_k = int(top_k)
-        s.top_p = top_p
-        s.repetition_penalty = repetition_penalty
-        s.max_tokens = int(max_tokens)
-        s.timeout = int(timeout)
-        s.output_dir = output_dir.strip() or OUTPUT_DIR
-        s.autosave = autosave
-        s.export_format = export_format
-        s.mp3_bitrate = int(mp3_bitrate)
-        s.loudnorm = loudnorm
-        s.trim_silence = trim_silence
-        s.denoise_ref = denoise_ref
-        if not denoise_ref:
-            if hasattr(engine, "unload_audio_preprocessors"):
-                engine.unload_audio_preprocessors()
-        s.batch_size = int(batch_size)
-        s.default_language = default_language
-
-        os.makedirs(s.output_dir, exist_ok=True)
-
-        parts = [S.SET_APPLIED_SIZE_QUANT.format(size=model_size, quant=quantization)]
+        ]
         if model_changed:
             parts.append(S.SET_APPLIED_UNLOADED)
+        if warnings:
+            parts.append(S.SETTINGS_SANITIZED)
         msg = S.SET_APPLIED.format(details=", ".join(parts))
-        lang_update = gr.update(value=default_language)
-        if default_language == LANGUAGE_AUTO:
-            # library import has no auto option (a saved voice has a concrete language)
-            lib_update = gr.update()
-        else:
-            lib_update = lang_update
-        return msg, msg, lang_update, lang_update, lang_update, lang_update, lang_update, lib_update
+
+    lang_update = gr.update(value=normalized.default_language)
+    if normalized.default_language == LANGUAGE_AUTO:
+        # library import has no auto option (a saved voice has a concrete language)
+        lib_update = gr.update()
+    else:
+        lib_update = lang_update
+    return msg, msg, lang_update, lang_update, lang_update, lang_update, lang_update, lib_update
+
+
+def wire(ctx, ui):
+    t = ui.settings
 
     def unload_model():
         ctx.engine.unload_model()
@@ -359,7 +416,7 @@ def wire(ctx, ui):
         outputs=[t.set_mp3_bitrate],
     )
     t.set_apply.click(
-        fn=apply_settings,
+        fn=lambda *values: apply_settings(ctx, *values),
         inputs=[
             t.set_size, t.set_quant,
             t.set_temperature, t.set_top_k, t.set_top_p, t.set_rep_penalty,
@@ -382,9 +439,14 @@ def wire(ctx, ui):
                  t.set_max_tokens, t.set_timeout],
     )
     t.set_reset.click(
-        fn=reset_generation_defaults,
-        outputs=[t.set_temperature, t.set_top_k, t.set_top_p, t.set_rep_penalty,
-                 t.set_max_tokens, t.set_timeout, t.set_preset],
+        fn=reset_settings_defaults,
+        outputs=[
+            t.set_size, t.set_quant, t.set_denoise_ref, t.set_default_language,
+            t.set_jit, t.set_preset, t.set_temperature, t.set_top_k, t.set_top_p,
+            t.set_rep_penalty, t.set_max_tokens, t.set_timeout, t.set_batch_size,
+            t.set_output_dir, t.set_autosave, t.set_export_format,
+            t.set_mp3_bitrate, t.set_loudnorm, t.set_trim_silence,
+        ],
     )
     t.set_unload.click(
         fn=unload_model,

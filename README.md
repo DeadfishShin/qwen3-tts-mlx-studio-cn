@@ -72,6 +72,13 @@ sampling behavior and does not reset one seed for every segment.
 
 **Settings** — Model size and quantization; generation controls with plain-language tooltips (temperature, top-k, top-p, repetition penalty, max length, auto-stop timeout); batch size; output folder and auto-save; export format (WAV/MP3/OGG) with MP3 bitrate; post-processing (normalize loudness, trim silence, reduce reference background noise); "speed up repeat runs" compilation toggle; speech-recognition, YT-cache, and model-cache management (view/delete downloaded models).
 
+### Local settings
+
+Clicking **应用设置** saves the Settings-tab preferences locally at
+`~/Qwen3-TTS/config/settings.json`. The file is created on demand, loaded safely
+when Studio starts, and is intentionally outside the repository: personal
+settings are local-only and are never committed to Git.
+
 ## While it generates
 
 Generation is never a black box:

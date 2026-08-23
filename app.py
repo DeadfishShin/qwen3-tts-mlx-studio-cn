@@ -24,7 +24,8 @@ from config import (
 )
 from engine import TTSEngine
 from history import GenerationHistory
-from state import AppContext, AppSettings
+from state import AppContext
+from settings_store import load_settings
 from theme import build_theme, custom_css
 from ui import strings as S
 from ui.tabs import (
@@ -48,10 +49,12 @@ parser = argparse.ArgumentParser(description="Qwen3-TTS MLX Studio")
 parser.add_argument("--host", default=SERVER_HOST, help="Server host")
 parser.add_argument("--port", type=int, default=SERVER_PORT, help="Server port")
 parser.add_argument(
-    "--model-size", choices=["0.6B", "1.7B"], default=DEFAULT_MODEL_SIZE
+    "--model-size", choices=["0.6B", "1.7B"], default=None,
+    help=f"Model size override (saved setting/default: {DEFAULT_MODEL_SIZE})",
 )
 parser.add_argument(
-    "--quant", choices=["4bit", "6bit", "8bit", "bf16"], default=DEFAULT_QUANTIZATION
+    "--quant", choices=["4bit", "6bit", "8bit", "bf16"], default=None,
+    help=f"Quantization override (saved setting/default: {DEFAULT_QUANTIZATION})",
 )
 parser.add_argument(
     "--share", action="store_true", help="Create public Gradio link"
@@ -61,7 +64,7 @@ args = parser.parse_args()
 # ---------------------------------------------------------------------------
 # Startup validation
 # ---------------------------------------------------------------------------
-def check_startup():
+def check_startup(output_dir=OUTPUT_DIR):
     warnings = []
     if sys.version_info < (3, 10):
         warnings.append(S.STARTUP_PYTHON_REQUIRED)
@@ -86,25 +89,35 @@ def check_startup():
         warnings.extend(yt_missing)
     except Exception as e:
         warnings.append(S.STARTUP_YT_ERROR.format(err=e))
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
     if warnings:
         for w in warnings:
             print(f"WARNING: {w}")
     return warnings
 
-startup_warnings = check_startup()
+loaded_settings = load_settings()
+settings = loaded_settings.settings
+if args.model_size is not None:
+    settings.model_size = args.model_size
+if args.quant is not None:
+    settings.quantization = args.quant
+startup_warnings = loaded_settings.warnings + check_startup(settings.output_dir)
 
 # ---------------------------------------------------------------------------
 # Application context
 # ---------------------------------------------------------------------------
-engine = TTSEngine(model_size=args.model_size, quantization=args.quant)
+engine = TTSEngine(
+    model_size=settings.model_size,
+    quantization=settings.quantization,
+    jit_compile=settings.jit_compile,
+)
 
 ctx = AppContext(
     engine=engine,
     library=VoiceLibrary(),
     history=GenerationHistory(),
     yt=get_yt_extractor(),
-    settings=AppSettings(),
+    settings=settings,
     startup_warnings=startup_warnings,
 )
 

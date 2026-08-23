@@ -110,12 +110,13 @@ class TTSEngine:
         self,
         model_size: str = DEFAULT_MODEL_SIZE,
         quantization: str = DEFAULT_QUANTIZATION,
+        jit_compile: bool | None = None,
     ):
         # These configuration values are ordinary Python state. The model and
         # every MLX object below are created/read only by _owner_loop().
         self.model_size = model_size
         self.quantization = quantization
-        self.jit_compile = ENABLE_JIT_COMPILE
+        self.jit_compile = ENABLE_JIT_COMPILE if jit_compile is None else bool(jit_compile)
 
         self.current_model = None
         self.current_model_type = None  # owner-thread state
