@@ -324,6 +324,12 @@ def _clone_extras(ctx):
     return S.NOISE_REDUCTION_SUFFIX if ctx.settings.denoise_ref else ""
 
 
+def streaming_interval_for_mode(mode: str) -> float:
+    """Resolve the internal stream interval for a single-stream mode call."""
+    return (VOICE_CLONE_STREAMING_INTERVAL_S
+            if mode == "voice_clone" else STREAMING_INTERVAL_S)
+
+
 def _batch_prepare_identity(ctx, req):
     return req, None
 
@@ -459,10 +465,7 @@ def run_single(ctx, req):
     start = time.monotonic()
     first_chunk_at = None
     stopped = timed_out = False
-    # The 2.0s Clone interval is intentionally selected only for this
-    # single-generation path. Batch fallback keeps the general 1.0s default.
-    streaming_interval = (VOICE_CLONE_STREAMING_INTERVAL_S
-                          if req.mode == "voice_clone" else STREAMING_INTERVAL_S)
+    streaming_interval = streaming_interval_for_mode(req.mode)
     stream = spec.call_stream(ctx, req, streaming_interval=streaming_interval,
                               **ctx.settings.gen_kwargs())
     try:
@@ -572,6 +575,7 @@ def run_batch(ctx, req, split_mode, silence_ms, progress):
         try:
             sr, audio = stream_to_audio(
                 ctx, spec.call_stream(ctx, replace(req, text=seg),
+                                      streaming_interval=streaming_interval_for_mode(req.mode),
                                       **ctx.settings.gen_kwargs()))
             audio_parts.append((sr, audio))
             table_rows.append([str(idx + 1), preview, f"{len(audio) / sr:.1f}s"])

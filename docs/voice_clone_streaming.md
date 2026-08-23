@@ -10,8 +10,10 @@
 - 2.0 秒流式：严重瞬态和起始呼吸均消失；声音从开头就稳定，主体音色与 1.0 秒流式结果相当。
 
 因此 `VOICE_CLONE_STREAMING_INTERVAL_S = 2.0` 只应用于单次 Voice Clone；Voice Design、Custom
-Voice、正常批量 API 以及批量失败后的单段回退仍使用原有 1.0 秒路径。由于 Stop/timeout
-只会在内部块之间检查，单次 Clone 的 2.0 秒间隔会略微降低取消和超时响应的时间粒度。
+Voice、正常批量 API 以及 Voice Design/Custom Voice 的批量单段回退仍使用原有 1.0 秒路径；
+Voice Clone 的批量单段回退现在也与单次 Clone 统一使用 2.0 秒。正常批量 API 仍是原有
+非流式路径。由于 Stop/timeout 只会在内部块之间检查，Clone 的 2.0 秒间隔会略微降低取消
+和超时响应的时间粒度。
 
 该结果是本项目当前模型与硬件上的 owner 验证记录，不是对所有机器、模型或 MLX-Audio
 版本都适用的普遍缺陷结论。若未来需要真正的低延迟流式输出，应继续调查解码器的首块上下文，

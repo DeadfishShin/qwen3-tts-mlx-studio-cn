@@ -118,7 +118,7 @@ def test_clone_batch_uses_batch_api_without_streaming_interval(
     assert not (tmp_path / "out").exists()
 
 
-def test_clone_batch_fallback_keeps_general_one_second_interval(
+def test_clone_batch_fallback_uses_two_second_interval(
         fake_engine, fake_history, tmp_path):
     fake_engine.fail_batch = True
     ctx = make_ctx(fake_engine, fake_history, tmp_path)
@@ -136,5 +136,71 @@ def test_clone_batch_fallback_keeps_general_one_second_interval(
         if call["method"] == "stream_generate_voice_clone"
     ]
     assert len(fallback_calls) == 2
+    assert all(call["kwargs"]["streaming_interval"] == 2.0
+               for call in fallback_calls)
+    assert all(call["ref_audio_path"] == "/tmp/reference.wav"
+               and call["ref_text"] == "准确的参考文本"
+               and call["language"] == "Chinese"
+               and call["denoise_ref"] is False
+               and call["trim_ref"] is False
+               and call["kwargs"]["temperature"] == ctx.settings.temperature
+               and call["kwargs"]["top_k"] == ctx.settings.top_k
+               and call["kwargs"]["top_p"] == ctx.settings.top_p
+               and call["kwargs"]["repetition_penalty"] == ctx.settings.repetition_penalty
+               and call["kwargs"]["max_tokens"] == ctx.settings.max_tokens
+               for call in fallback_calls)
+    assert not (tmp_path / "out").exists()
+
+
+def test_voice_design_batch_fallback_uses_one_second_interval(
+        fake_engine, fake_history, tmp_path):
+    fake_engine.fail_batch = True
+    ctx = make_ctx(fake_engine, fake_history, tmp_path)
+    request = GenRequest(
+        mode="voice_design", text="第一段。\n\n第二段。", language="Chinese",
+        voice_description="稳定、清晰的成年女性声音",
+    )
+
+    list(run_batch(ctx, request, "paragraph", 300, NoProgress()))
+
+    fallback_calls = [
+        call for call in fake_engine.stream_calls
+        if call["method"] == "stream_generate_voice_design"
+    ]
+    assert len(fallback_calls) == 2
     assert all(call["kwargs"]["streaming_interval"] == 1.0
                for call in fallback_calls)
+    assert all(call["kwargs"]["temperature"] == ctx.settings.temperature
+               and call["kwargs"]["top_k"] == ctx.settings.top_k
+               and call["kwargs"]["top_p"] == ctx.settings.top_p
+               and call["kwargs"]["repetition_penalty"] == ctx.settings.repetition_penalty
+               and call["kwargs"]["max_tokens"] == ctx.settings.max_tokens
+               for call in fallback_calls)
+    assert not (tmp_path / "out").exists()
+
+
+def test_custom_voice_batch_fallback_uses_one_second_interval(
+        fake_engine, fake_history, tmp_path):
+    fake_engine.fail_batch = True
+    ctx = make_ctx(fake_engine, fake_history, tmp_path)
+    request = GenRequest(
+        mode="custom_voice", text="第一段。\n\n第二段。", language="Chinese",
+        speaker="serena", instruct="自然、平静",
+    )
+
+    list(run_batch(ctx, request, "paragraph", 300, NoProgress()))
+
+    fallback_calls = [
+        call for call in fake_engine.stream_calls
+        if call["method"] == "stream_generate_custom_voice"
+    ]
+    assert len(fallback_calls) == 2
+    assert all(call["kwargs"]["streaming_interval"] == 1.0
+               for call in fallback_calls)
+    assert all(call["kwargs"]["temperature"] == ctx.settings.temperature
+               and call["kwargs"]["top_k"] == ctx.settings.top_k
+               and call["kwargs"]["top_p"] == ctx.settings.top_p
+               and call["kwargs"]["repetition_penalty"] == ctx.settings.repetition_penalty
+               and call["kwargs"]["max_tokens"] == ctx.settings.max_tokens
+               for call in fallback_calls)
+    assert not (tmp_path / "out").exists()
