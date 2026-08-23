@@ -77,6 +77,14 @@ DEFAULT_VOICE_DESIGN_SEED = 123456
 # doesn't have.
 STREAMING_INTERVAL_S = 1.0
 
+# Owner-controlled Apple Silicon testing found a severe startup timbre
+# transient in the first ~0.5s of the Qwen3-TTS Base Voice Clone stream at
+# 1.0s.  A Clone-only 2.0s interval removed that artifact in the same test;
+# the longer chunk slightly reduces Stop/timeout granularity.  Keep this
+# scoped to Clone while future low-latency work investigates decoder
+# first-chunk context instead of treating 2.0s as universally optimal.
+VOICE_CLONE_STREAMING_INTERVAL_S = 2.0
+
 # Output defaults
 DEFAULT_AUTOSAVE = False
 DEFAULT_EXPORT_FORMAT = "wav"    # "wav", "mp3", "ogg"

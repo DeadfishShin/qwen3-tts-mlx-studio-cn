@@ -20,6 +20,7 @@ from config import (
     LANGUAGE_AUTO,
     MAX_BATCH_SEGMENTS,
     STREAMING_INTERVAL_S,
+    VOICE_CLONE_STREAMING_INTERVAL_S,
     VOICE_DESIGN_SEED_MAX,
     VOICE_DESIGN_SEED_MIN,
 )
@@ -368,9 +369,9 @@ MODES = {
         model_type="custom_voice", save_prefix="custom",
         validate=_validate_common,
         prepare=_no_prepare,
-        call_stream=lambda ctx, req, **kw: ctx.engine.stream_generate_custom_voice(
+        call_stream=lambda ctx, req, streaming_interval=STREAMING_INTERVAL_S, **kw: ctx.engine.stream_generate_custom_voice(
             req.text, req.speaker, api_language(req.language), req.instruct,
-            streaming_interval=STREAMING_INTERVAL_S, **kw),
+            streaming_interval=streaming_interval, **kw),
         history_kwargs=lambda req: dict(
             speaker=req.speaker,
             voice_params=req.instruct if req.instruct else ""),
@@ -385,11 +386,11 @@ MODES = {
         model_type="voice_design", save_prefix="design",
         validate=_validate_design,
         prepare=_no_prepare,
-        call_stream=lambda ctx, req, **kw: ctx.engine.stream_generate_voice_design(
+        call_stream=lambda ctx, req, streaming_interval=STREAMING_INTERVAL_S, **kw: ctx.engine.stream_generate_voice_design(
             req.text, api_language(req.language),
             compose_voice_design_instruct(request_voice_description(req), req.style_instruction),
             seed=req.actual_seed,
-            streaming_interval=STREAMING_INTERVAL_S, **kw),
+            streaming_interval=streaming_interval, **kw),
         history_kwargs=lambda req: dict(
             voice_params=request_voice_description(req),
             voice_description=request_voice_description(req),
@@ -409,10 +410,10 @@ MODES = {
         model_type="base", save_prefix="clone",
         validate=_validate_common,
         prepare=_prepare_clone,
-        call_stream=lambda ctx, req, **kw: ctx.engine.stream_generate_voice_clone(
+        call_stream=lambda ctx, req, streaming_interval=STREAMING_INTERVAL_S, **kw: ctx.engine.stream_generate_voice_clone(
             req.text, req.ref_audio, req.ref_text, api_language(req.language),
             denoise_ref=ctx.settings.denoise_ref, trim_ref=req.trim_ref,
-            streaming_interval=STREAMING_INTERVAL_S, **kw),
+            streaming_interval=streaming_interval, **kw),
         history_kwargs=lambda req: dict(
             voice_params=f"ref: {_clone_voice_info(req)}"),
         status_extras=_clone_extras,
@@ -458,7 +459,12 @@ def run_single(ctx, req):
     start = time.monotonic()
     first_chunk_at = None
     stopped = timed_out = False
-    stream = spec.call_stream(ctx, req, **ctx.settings.gen_kwargs())
+    # The 2.0s Clone interval is intentionally selected only for this
+    # single-generation path. Batch fallback keeps the general 1.0s default.
+    streaming_interval = (VOICE_CLONE_STREAMING_INTERVAL_S
+                          if req.mode == "voice_clone" else STREAMING_INTERVAL_S)
+    stream = spec.call_stream(ctx, req, streaming_interval=streaming_interval,
+                              **ctx.settings.gen_kwargs())
     try:
         for csr, chunk in stream:
             sr = csr

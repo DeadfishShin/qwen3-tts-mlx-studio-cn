@@ -20,6 +20,8 @@ class FakeEngine:
         self.current_model = None
         self.current_model_type = None
         self.calls = []                          # (method, args) log
+        self.stream_calls = []                   # structured stream-call log
+        self.batch_calls = []                    # structured batch-call log
         self.n_chunks = 3                        # chunks per fake stream
         self.chunk_secs = 0.5                    # audio seconds per chunk
         self.chunk_hook = None                   # callable(i) before yielding chunk i
@@ -66,16 +68,31 @@ class FakeEngine:
 
     def stream_generate_custom_voice(self, text, speaker, language, instruct="", **kw):
         self.calls.append(("stream_generate_custom_voice", text, language))
+        self.stream_calls.append({
+            "method": "stream_generate_custom_voice", "text": text,
+            "speaker": speaker, "language": language, "instruct": instruct,
+            "kwargs": dict(kw),
+        })
         yield from self._stream("custom_voice", "custom_voice")
 
     def stream_generate_voice_design(self, text, language, instruct, **kw):
         self.calls.append(("stream_generate_voice_design", text, language))
+        self.stream_calls.append({
+            "method": "stream_generate_voice_design", "text": text,
+            "language": language, "instruct": instruct, "kwargs": dict(kw),
+        })
         yield from self._stream("voice_design", "voice_design")
 
     def stream_generate_voice_clone(self, text, ref_audio_path, ref_text,
                                     language="English", denoise_ref=False,
                                     trim_ref=False, **kw):
         self.calls.append(("stream_generate_voice_clone", text, language))
+        self.stream_calls.append({
+            "method": "stream_generate_voice_clone", "text": text,
+            "ref_audio_path": ref_audio_path, "ref_text": ref_text,
+            "language": language, "denoise_ref": denoise_ref,
+            "trim_ref": trim_ref, "kwargs": dict(kw),
+        })
         yield from self._stream("voice_clone", "base")
 
     def stream_transcribe(self, audio_path, language="auto"):
@@ -87,6 +104,12 @@ class FakeEngine:
                                    language="English", denoise_ref=False,
                                    trim_ref=False, **kw):
         self.calls.append(("batch_generate_voice_clone", tuple(texts), language))
+        self.batch_calls.append({
+            "method": "batch_generate_voice_clone", "texts": tuple(texts),
+            "ref_audio_path": ref_audio_path, "ref_text": ref_text,
+            "language": language, "denoise_ref": denoise_ref,
+            "trim_ref": trim_ref, "kwargs": dict(kw),
+        })
         if self.fail_batch:
             raise RuntimeError("fake batch failure")
         self.current_model_type = "base"
@@ -94,6 +117,11 @@ class FakeEngine:
 
     def batch_generate_custom_voice(self, texts, speaker, language, instruct="", **kw):
         self.calls.append(("batch_generate_custom_voice", tuple(texts), language))
+        self.batch_calls.append({
+            "method": "batch_generate_custom_voice", "texts": tuple(texts),
+            "speaker": speaker, "language": language, "instruct": instruct,
+            "kwargs": dict(kw),
+        })
         if self.fail_batch:
             raise RuntimeError("fake batch failure")
         self.current_model_type = "custom_voice"
@@ -101,6 +129,10 @@ class FakeEngine:
 
     def batch_generate_voice_design(self, texts, language, instruct, **kw):
         self.calls.append(("batch_generate_voice_design", tuple(texts), language))
+        self.batch_calls.append({
+            "method": "batch_generate_voice_design", "texts": tuple(texts),
+            "language": language, "instruct": instruct, "kwargs": dict(kw),
+        })
         if self.fail_batch:
             raise RuntimeError("fake batch failure")
         self.current_model_type = "voice_design"
