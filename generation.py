@@ -4,6 +4,8 @@ All tab handlers route generation through this module; it is the only caller
 of the engine's generate methods.
 """
 import os
+import math
+import secrets
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -13,7 +15,14 @@ import gradio as gr
 import numpy as np
 
 from audio_utils import concatenate_audio, export_audio, split_text
-from config import LANGUAGE_AUTO, MAX_BATCH_SEGMENTS, STREAMING_INTERVAL_S
+from config import (
+    DEFAULT_VOICE_DESIGN_SEED,
+    LANGUAGE_AUTO,
+    MAX_BATCH_SEGMENTS,
+    STREAMING_INTERVAL_S,
+    VOICE_DESIGN_SEED_MAX,
+    VOICE_DESIGN_SEED_MIN,
+)
 from ui import strings as S
 
 
@@ -56,6 +65,10 @@ def stream_to_audio(ctx, stream):
 def generate_once(ctx, req):
     """Blocking single generation via the streaming path (cancel/timeout aware)."""
     spec = MODES[req.mode]
+    if req.mode == "voice_design":
+        error = prepare_voice_design_seed(req)
+        if error:
+            raise ValueError(error)
     return stream_to_audio(ctx, spec.call_stream(ctx, req, **ctx.settings.gen_kwargs()))
 
 
@@ -162,6 +175,65 @@ class GenRequest:
     trim_ref: bool = True           # voice_clone: VAD-trim reference silence
     voice_description: str = ""     # voice_design: stable identity description
     style_instruction: str = ""     # voice_design: per-generation delivery style
+    random_seed: bool = True         # voice_design: resolve a fresh seed per run
+    seed: int = DEFAULT_VOICE_DESIGN_SEED  # voice_design fixed-mode input
+    actual_seed: int | None = None  # resolved seed for this completed request
+
+
+def normalize_voice_design_seed(value) -> int:
+    """Validate the integer range accepted by the Voice Design UI/API.
+
+    Gradio Number values may arrive as Python ints, integral floats, or numeric
+    strings.  Fractional values, booleans, missing values, and out-of-range
+    values are rejected instead of being silently truncated.
+    """
+    if value is None or isinstance(value, bool):
+        raise ValueError("seed must be an integer")
+    if isinstance(value, float):
+        if not math.isfinite(value) or not value.is_integer():
+            raise ValueError("seed must be an integer")
+    elif isinstance(value, str):
+        value = value.strip()
+        if not value or value.lstrip("+-").isdigit() is False:
+            raise ValueError("seed must be an integer")
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("seed must be an integer") from exc
+    if not VOICE_DESIGN_SEED_MIN <= normalized <= VOICE_DESIGN_SEED_MAX:
+        raise ValueError(
+            f"seed must be between {VOICE_DESIGN_SEED_MIN} and "
+            f"{VOICE_DESIGN_SEED_MAX}"
+        )
+    return normalized
+
+
+def resolve_voice_design_seed(random_each: bool, requested_seed,
+                              entropy=None) -> int:
+    """Resolve one actual seed without mutating MLX state.
+
+    ``entropy`` is injectable for deterministic tests.  The production path
+    uses ``secrets.randbelow`` so random-mode generations do not depend on the
+    caller thread's Python PRNG state.
+    """
+    if random_each:
+        entropy = entropy or (lambda: secrets.randbelow(VOICE_DESIGN_SEED_MAX + 1))
+        return normalize_voice_design_seed(entropy())
+    return normalize_voice_design_seed(requested_seed)
+
+
+def voice_design_seed_mode(req: GenRequest) -> str:
+    return "random" if req.random_seed else "fixed"
+
+
+def prepare_voice_design_seed(req: GenRequest) -> str | None:
+    """Resolve and attach the seed for one Voice Design request."""
+    try:
+        req.actual_seed = resolve_voice_design_seed(req.random_seed, req.seed)
+    except ValueError:
+        gr.Warning(S.VD_SEED_INVALID_WARN)
+        return S.VD_SEED_INVALID
+    return None
 
 
 def compose_voice_design_instruct(voice_description: str, style_instruction: str = "") -> str:
@@ -316,6 +388,7 @@ MODES = {
         call_stream=lambda ctx, req, **kw: ctx.engine.stream_generate_voice_design(
             req.text, api_language(req.language),
             compose_voice_design_instruct(request_voice_description(req), req.style_instruction),
+            seed=req.actual_seed,
             streaming_interval=STREAMING_INTERVAL_S, **kw),
         history_kwargs=lambda req: dict(
             voice_params=request_voice_description(req),
@@ -371,6 +444,11 @@ def run_single(ctx, req):
     if err:
         yield gr.skip(), err
         return
+    if req.mode == "voice_design":
+        err = prepare_voice_design_seed(req)
+        if err:
+            yield gr.skip(), err
+            return
     msg = loading_status(ctx, spec.model_type)
     if msg:
         yield gr.skip(), msg
@@ -416,17 +494,29 @@ def run_single(ctx, req):
         yield result, status
         return
     elapsed = time.monotonic() - start
+    history_kwargs = spec.history_kwargs(req)
+    if req.mode == "voice_design":
+        history_kwargs.update(
+            seed=req.actual_seed,
+            seed_mode=voice_design_seed_mode(req),
+            **ctx.settings.gen_kwargs(),
+        )
+        ctx.last_voice_design_seed = req.actual_seed
+        ctx.last_voice_design_style_instruction = (req.style_instruction or "").strip()
     ctx.history.add(mode=req.mode, text=req.text, language=req.language,
-                    audio=result, **spec.history_kwargs(req))
+                    audio=result, **history_kwargs)
     save_msg = ""
     if ctx.settings.autosave:
         save_msg = "｜" + save_audio(ctx, result, spec.save_prefix)
-    yield result, S.GENERATED_STATUS.format(
+    status = S.GENERATED_STATUS.format(
         secs=elapsed,
         repo=ctx.engine.get_repo_id(spec.model_type),
         extras=spec.status_extras(ctx),
         save=save_msg,
     )
+    if req.mode == "voice_design":
+        status += "｜" + S.VD_SEED_USED.format(seed=req.actual_seed)
+    yield result, status
 
 
 def _segment_preview(seg):

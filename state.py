@@ -51,6 +51,10 @@ class AppContext:
     yt: Any
     settings: AppSettings
     startup_warnings: List[str] = field(default_factory=list)
+    # Successful Voice Design provenance used by the optional Voice Library
+    # save action and the "use last seed" UI control.
+    last_voice_design_seed: int | None = None
+    last_voice_design_style_instruction: str = ""
     # One shared cooperative-cancel flag: the engine lock serializes runs, so a
     # single event is enough. Runners clear it at start; Stop buttons set it.
     cancel_event: threading.Event = field(default_factory=threading.Event)

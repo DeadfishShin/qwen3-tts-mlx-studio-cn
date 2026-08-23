@@ -96,6 +96,17 @@ def history_regenerate(ctx, entry_id):
         parts.append(S.HIST_VOICE_DESCRIPTION.format(description=entry.voice_description))
     if getattr(entry, "style_instruction", ""):
         parts.append(S.HIST_STYLE_INSTRUCTION.format(style=entry.style_instruction))
+    if getattr(entry, "seed", None) is not None:
+        seed_mode = "每次随机" if getattr(entry, "seed_mode", "") == "random" else "固定"
+        parts.append(S.HIST_SEED.format(seed=entry.seed, mode=seed_mode))
+    if getattr(entry, "temperature", None) is not None:
+        parts.append(S.HIST_SAMPLING.format(
+            temperature=entry.temperature,
+            top_k=entry.top_k,
+            top_p=entry.top_p,
+            repetition_penalty=entry.repetition_penalty,
+            max_tokens=entry.max_tokens,
+        ))
     if entry.voice_params and not getattr(entry, "voice_description", ""):
         parts.append(S.HIST_PARAMS.format(params=entry.voice_params))
     parts.append(S.HIST_TEXT.format(text=entry.text))

@@ -122,6 +122,19 @@ VD_INFO = (
 VD_IDENTITY_HEADER = "声音身份："
 VD_STYLE_HEADER = "本次说话风格："
 VD_PROMPT_FORMAT = "{identity}\n{description}\n\n{style}\n{style_instruction}"
+VD_SEED_HEADER = "随机种子模式"
+VD_RANDOM_EACH = "每次随机"
+VD_SEED = "随机种子"
+VD_SEED_INFO = (
+    "勾选“每次随机”进行抽卡；取消勾选后使用输入的固定整数种子，"
+    "范围为 0–4294967295。种子控制适用于单条声音设计；批量模式保持当前连续采样，"
+    "不会为每个片段重复重置同一个种子。"
+)
+VD_USE_LAST_SEED = "使用上次种子"
+VD_NO_LAST_SEED = "还没有可复用的声音设计种子。"
+VD_SEED_USED = "本次使用的随机种子：{seed}"
+VD_SEED_INVALID = "随机种子必须是 0–4294967295 范围内的整数"
+VD_SEED_INVALID_WARN = "随机种子无效，请输入 0–4294967295 范围内的整数。"
 VD_SAVE_NO_AUDIO_WARN = "请先生成音频，再保存到声音库。"
 VD_SAVE_NO_AUDIO = "没有可保存的音频"
 VD_SAVE_NO_NAME_WARN = "请输入声音名称。"
@@ -390,6 +403,11 @@ HIST_VOICE = "声音：{speaker}"
 HIST_PARAMS = "参数：{params}"
 HIST_VOICE_DESCRIPTION = "声音描述：{description}"
 HIST_STYLE_INSTRUCTION = "风格指令：{style}"
+HIST_SEED = "随机种子：{seed}（{mode}）"
+HIST_SAMPLING = (
+    "采样设置：temperature={temperature}，top-k={top_k}，top-p={top_p}，"
+    "重复惩罚={repetition_penalty}，最大 token={max_tokens}"
+)
 HIST_TEXT = "文本：{text}"
 
 # --- Voice Library tab ---

@@ -156,6 +156,46 @@ def test_cancellation_closes_owner_stream_without_poisoning_next_request(owner_e
     assert not any(kind == "streams" for kind, _ in events)
 
 
+def test_voice_design_seed_is_applied_on_persistent_owner_thread(owner_engine, monkeypatch):
+    eng, _, _ = owner_engine
+    seed_events = []
+    monkeypatch.setattr(
+        engine.TTSEngine,
+        "_seed_mlx_rng",
+        lambda self, seed: seed_events.append((seed, threading.get_ident())),
+    )
+
+    stream = eng.stream_generate_voice_design(
+        "seeded", "Chinese", "calm", seed=123456
+    )
+    list(stream)
+
+    assert seed_events == [(123456, eng.owner_thread_id)]
+
+
+def test_cancellation_does_not_poison_following_seeded_request(owner_engine, monkeypatch):
+    eng, _, _ = owner_engine
+    seed_events = []
+    monkeypatch.setattr(
+        engine.TTSEngine,
+        "_seed_mlx_rng",
+        lambda self, seed: seed_events.append((seed, threading.get_ident())),
+    )
+
+    stream = eng.stream_generate_voice_design(
+        "cancelled", "Chinese", "calm", seed=1
+    )
+    next(stream)
+    stream.close()
+
+    next_result = eng.generate_voice_design(
+        "next", "Chinese", "calm", seed=2
+    )
+    assert next_result[0] == 24000
+    assert seed_events == [(1, eng.owner_thread_id), (2, eng.owner_thread_id)]
+    assert eng.owner_thread_alive
+
+
 def test_clear_cache_is_per_request_and_clear_streams_is_owner_shutdown_only(owner_engine):
     eng, _, events = owner_engine
     eng.generate_voice_design("one", "Chinese", "calm")

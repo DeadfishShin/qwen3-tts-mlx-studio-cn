@@ -33,6 +33,8 @@ class VoiceLibrary:
         language: str,
         description: str = "",
         source: str = "clone",
+        seed: int | None = None,
+        style_instruction: str = "",
     ) -> str:
         """Save a new voice profile. Returns profile directory path."""
         safe_name = self._sanitize_name(name)
@@ -54,6 +56,10 @@ class VoiceLibrary:
             "created": datetime.now().isoformat(timespec="seconds"),
             "source": source,
         }
+        if seed is not None:
+            profile["seed"] = int(seed)
+        if style_instruction:
+            profile["style_instruction"] = style_instruction
         profile_path = os.path.join(voice_dir, "profile.json")
         with open(profile_path, "w") as f:
             json.dump(profile, f, indent=4)

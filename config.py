@@ -62,6 +62,14 @@ DEFAULT_REPETITION_PENALTY = 1.05
 DEFAULT_MAX_TOKENS = 4096
 DEFAULT_TIMEOUT = 120
 
+# Voice Design reproducibility.  MLX accepts a Python integer seed; this
+# conservative uint32-sized range is also exactly representable by the UI's
+# JavaScript number transport.  The seed is applied only on TTSEngine's MLX
+# owner thread, never from a Gradio/AnyIO caller.
+VOICE_DESIGN_SEED_MIN = 0
+VOICE_DESIGN_SEED_MAX = 2**32 - 1
+DEFAULT_VOICE_DESIGN_SEED = 123456
+
 # Streaming decode (Stage 3) — generation is consumed in chunks internally so
 # Stop/timeout can land between chunks; this sets the cancel latency (seconds
 # of audio per chunk). Live playback of these chunks was removed: it needs

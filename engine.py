@@ -529,6 +529,12 @@ class TTSEngine:
 
     def _generate_voice_design_impl(self, text, language, instruct, **kwargs):
         self._load_model("voice_design")
+        seed = kwargs.pop("seed", None)
+        if seed is not None:
+            # This method is executed by _owner_loop.  Do not move RNG
+            # mutation into the Gradio/AnyIO caller or into a reusable pool
+            # thread: MLX random state is thread-affine here.
+            self._seed_mlx_rng(seed)
         results = list(self.current_model.generate_voice_design(
             text=text, language=language, instruct=instruct, **kwargs
         ))
@@ -540,6 +546,12 @@ class TTSEngine:
                 text, language, instruct, **kwargs
             )
         )
+
+    def _seed_mlx_rng(self, seed: int):
+        """Seed MLX global RNG, enforcing owner-thread affinity."""
+        if not self._on_owner_thread():
+            raise RuntimeError("MLX RNG must be seeded on the owner thread")
+        mx.random.seed(int(seed))
 
     def _prepare_ref(self, ref_audio_path, trim_ref, denoise_ref):
         """Owner-only reference preprocessing; VAD/DeepFilter stay affine."""
@@ -608,8 +620,13 @@ class TTSEngine:
         )
 
     def _stream_voice_design_impl(self, text, language, instruct,
-                                  streaming_interval=2.0, **kwargs):
+                                  streaming_interval=2.0, seed=None, **kwargs):
         self._load_model("voice_design")
+        if seed is not None:
+            # Qwen3-TTS exposes no seed keyword. Its sampler consumes MLX's
+            # global PRNG state, so seed it immediately before inference on
+            # this persistent owner thread.
+            self._seed_mlx_rng(seed)
         return self.current_model.generate_voice_design(
             text=text, language=language, instruct=instruct,
             stream=True, streaming_interval=streaming_interval, **kwargs

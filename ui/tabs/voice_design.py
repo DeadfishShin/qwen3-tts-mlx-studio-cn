@@ -6,7 +6,12 @@ import types
 import gradio as gr
 import soundfile as sf
 
-from config import OUTPUT_DIR
+from config import (
+    DEFAULT_VOICE_DESIGN_SEED,
+    OUTPUT_DIR,
+    VOICE_DESIGN_SEED_MAX,
+    VOICE_DESIGN_SEED_MIN,
+)
 from generation import GenRequest, run_batch, run_single, save_audio
 from ui import strings as S
 from ui.components import (
@@ -35,6 +40,21 @@ def build(ctx):
                     lines=2,
                     placeholder=S.VD_STYLE_PLACEHOLDER,
                 )
+                gr.Markdown(f"### {S.VD_SEED_HEADER}")
+                with gr.Row():
+                    vd_random_seed = gr.Checkbox(
+                        label=S.VD_RANDOM_EACH, value=True,
+                    )
+                    vd_seed = gr.Number(
+                        label=S.VD_SEED,
+                        value=DEFAULT_VOICE_DESIGN_SEED,
+                        minimum=VOICE_DESIGN_SEED_MIN,
+                        maximum=VOICE_DESIGN_SEED_MAX,
+                        step=1,
+                        precision=0,
+                    )
+                    vd_use_last_seed = gr.Button(S.VD_USE_LAST_SEED)
+                gr.Markdown(S.VD_SEED_INFO, elem_classes=["text-hint"])
                 vd_language = gr.Dropdown(
                     choices=S.LANGUAGE_CHOICES,
                     value=S.LANGUAGE_AUTO_VALUE, label=S.LANGUAGE
@@ -47,6 +67,8 @@ def build(ctx):
     return types.SimpleNamespace(
         vd_text=vd_text, vd_voice_description=vd_description,
         vd_instruct=vd_description, vd_style_instruction=vd_style_instruction,
+        vd_random_seed=vd_random_seed, vd_seed=vd_seed,
+        vd_use_last_seed=vd_use_last_seed,
         vd_language=vd_language,
         vd_generate=vd_generate,
         vd_lib_name=lib.lib_name, vd_lib_save=lib.lib_save, vd_lib_status=lib.lib_status,
@@ -77,6 +99,8 @@ def save_design_to_library(ctx, audio_tuple, name, language, description, spoken
         language=language,
         description=description,
         source="design",
+        seed=getattr(ctx, "last_voice_design_seed", None),
+        style_instruction=getattr(ctx, "last_voice_design_style_instruction", ""),
     )
     os.remove(tmp_path)
     return S.VD_SAVED.format(name=name)
@@ -85,11 +109,13 @@ def save_design_to_library(ctx, audio_tuple, name, language, description, spoken
 def wire(ctx, ui):
     t = ui.vd
 
-    def on_generate(text, language, voice_description, style_instruction):
+    def on_generate(text, language, voice_description, style_instruction,
+                    random_seed, seed):
         yield from run_single(ctx, GenRequest(
             mode="voice_design", text=text, language=language,
             instruct=voice_description, voice_description=voice_description,
-            style_instruction=style_instruction))
+            style_instruction=style_instruction, random_seed=random_seed,
+            seed=seed))
 
     def on_batch(text, language, voice_description, style_instruction,
                  split_mode, silence_ms,
@@ -106,10 +132,20 @@ def wire(ctx, ui):
         return result, gr.update(choices=voice_choices(ctx))
 
     wire_stop(ctx, t.vd_stop, ui.status)
+    def use_last_seed():
+        seed = getattr(ctx, "last_voice_design_seed", None)
+        if seed is None:
+            gr.Info(S.VD_NO_LAST_SEED)
+            return gr.skip()
+        return seed
+
+    t.vd_use_last_seed.click(
+        fn=use_last_seed, outputs=[t.vd_seed], queue=False,
+    )
     wire_run_lifecycle(
         t.vd_generate, t.vd_stop, on_generate,
         inputs=[t.vd_text, t.vd_language, t.vd_voice_description,
-                t.vd_style_instruction],
+                t.vd_style_instruction, t.vd_random_seed, t.vd_seed],
         outputs=[t.vd_audio, ui.status],
     )
     t.vd_save.click(

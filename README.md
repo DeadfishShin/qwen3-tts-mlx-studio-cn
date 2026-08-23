@@ -49,6 +49,15 @@ If you don't have Homebrew yet, open Terminal and paste:
 
 **Voice Design** — Describe a voice in plain language and the model creates it. Designed voices can be saved to the Voice Library. Supports batch generation.
 
+Voice Design includes a Chinese random-seed control. “每次随机” explores new
+candidate voices; disabling it and reusing the same seed supports controlled
+A/B comparisons. The installed mlx-audio path uses MLX global RNG state rather
+than a model-level `seed=` argument, so the seed is applied on the dedicated
+MLX inference thread. A fixed seed targets the same RNG sequence, but this
+project does not promise bit-identical Apple GPU waveforms until real-host
+verification. Batch Voice Design deliberately keeps its existing continuous
+sampling behavior and does not reset one seed for every segment.
+
 **Voice Clone** — Clone a voice from a short reference audio clip (3-30 seconds). Provide the clip and a reference transcript of exactly what was spoken — the "Transcribe Reference" button can auto-fill it using on-device speech recognition. Reference clips are auto-trimmed of leading/trailing silence (toggleable) and can optionally be denoised. Batch generation runs as true batched inference sharing the reference.
 
 **YT Voice Clone** — Clone a voice directly from a YouTube video. Paste a URL, select a timestamp range, and the transcript auto-fills from subtitles. A "Transcribe Clip" button is available when subtitles are missing or inaccurate. Clips are cached in `.yt_cache/`.

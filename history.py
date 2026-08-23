@@ -27,6 +27,13 @@ class HistoryEntry:
     audio_file: str = ""    # filename within HISTORY_DIR
     voice_description: str = ""  # stable Voice Design identity description
     style_instruction: str = ""   # transient Voice Design delivery style
+    seed: int | None = None       # actual seed used, when supported
+    seed_mode: str = ""            # "random" or "fixed"
+    temperature: float | None = None
+    top_k: int | None = None
+    top_p: float | None = None
+    repetition_penalty: float | None = None
+    max_tokens: int | None = None
 
 
 INDEX_FILE = "index.json"
@@ -72,6 +79,13 @@ class GenerationHistory:
         voice_params: str = "",
         voice_description: str = "",
         style_instruction: str = "",
+        seed: int | None = None,
+        seed_mode: str = "",
+        temperature: float | None = None,
+        top_k: int | None = None,
+        top_p: float | None = None,
+        repetition_penalty: float | None = None,
+        max_tokens: int | None = None,
     ) -> HistoryEntry:
         """Record a generation. Saves WAV to disk and updates index."""
         sr, audio_data = audio
@@ -86,6 +100,13 @@ class GenerationHistory:
             voice_params=voice_params,
             voice_description=voice_description,
             style_instruction=style_instruction,
+            seed=seed,
+            seed_mode=seed_mode,
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
+            max_tokens=max_tokens,
         )
         entry.audio_file = f"{entry.id}.wav"
 
